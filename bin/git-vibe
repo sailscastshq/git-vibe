@@ -1,0 +1,534 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+APP_ROOT="$(cd "${SELF_DIR}/.." && pwd)"
+VERSION_FILE="${APP_ROOT}/VERSION"
+VERSION="0.0.0"
+
+if [[ -f "${VERSION_FILE}" ]]; then
+  VERSION="$(<"${VERSION_FILE}")"
+fi
+
+die() {
+  printf 'git-vibe: %s\n' "$*" >&2
+  exit 1
+}
+
+say() {
+  printf '%s\n' "$*"
+}
+
+require_repo() {
+  git rev-parse --show-toplevel >/dev/null 2>&1 || die "run this command inside a Git repository"
+}
+
+repo_root() {
+  git rev-parse --path-format=absolute --show-toplevel
+}
+
+repo_name() {
+  basename "$(repo_root)"
+}
+
+git_config_get() {
+  git config --get "$1" 2>/dev/null || true
+}
+
+base_branch() {
+  local configured
+  configured="$(git_config_get vibe.baseBranch)"
+  printf '%s\n' "${configured:-main}"
+}
+
+branch_prefix() {
+  local configured
+  configured="$(git_config_get vibe.branchPrefix)"
+  printf '%s\n' "${configured:-feat/}"
+}
+
+worktree_root_setting() {
+  local configured
+  configured="$(git_config_get vibe.worktreeRoot)"
+  printf '%s\n' "${configured:-../.vibe}"
+}
+
+current_branch() {
+  git branch --show-current
+}
+
+slugify() {
+  printf '%s' "$*" \
+    | tr '[:upper:]' '[:lower:]' \
+    | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//; s/-{2,}/-/g'
+}
+
+worktree_root() {
+  local root repo
+  repo="$(repo_root)"
+  root="$(worktree_root_setting)"
+
+  if [[ "${root}" = /* ]]; then
+    printf '%s\n' "${root}"
+    return 0
+  fi
+
+  (
+    cd "${repo}" >/dev/null 2>&1
+    mkdir -p "${root}"
+    cd "${root}" >/dev/null 2>&1
+    pwd
+  )
+}
+
+vibe_root() {
+  printf '%s/%s\n' "$(worktree_root)" "$(repo_name)"
+}
+
+slug_from_name() {
+  local slug
+  slug="$(slugify "$*")"
+  [[ -n "${slug}" ]] || die "feature name produced an empty slug"
+  printf '%s\n' "${slug}"
+}
+
+branch_from_slug() {
+  printf '%s%s\n' "$(branch_prefix)" "$1"
+}
+
+slug_from_branch() {
+  local branch prefix
+  branch="$1"
+  prefix="$(branch_prefix)"
+  printf '%s\n' "${branch#${prefix}}"
+}
+
+worktree_path_for_slug() {
+  printf '%s/%s\n' "$(vibe_root)" "$1"
+}
+
+ensure_clean_tree() {
+  local path
+  path="$1"
+  [[ -d "${path}" ]] || return 0
+
+  if [[ -n "$(git -C "${path}" status --porcelain)" ]]; then
+    die "worktree at ${path} has uncommitted changes"
+  fi
+}
+
+branch_exists() {
+  git show-ref --verify --quiet "refs/heads/$1"
+}
+
+remote_branch_exists() {
+  git show-ref --verify --quiet "refs/remotes/$1"
+}
+
+is_ancestor_of() {
+  git merge-base --is-ancestor "$1" "$2" >/dev/null 2>&1
+}
+
+find_worktree_for_branch() {
+  local target path branch line
+  target="refs/heads/$1"
+  path=""
+  branch=""
+
+  while IFS= read -r line; do
+    case "${line}" in
+      worktree\ *)
+        path="${line#worktree }"
+        ;;
+      branch\ *)
+        branch="${line#branch }"
+        ;;
+      "")
+        if [[ "${branch}" == "${target}" ]]; then
+          printf '%s\n' "${path}"
+          return 0
+        fi
+        path=""
+        branch=""
+        ;;
+    esac
+  done < <(git worktree list --porcelain; printf '\n')
+
+  return 1
+}
+
+list_vibes_raw() {
+  local prefix path branch line
+  prefix="$(branch_prefix)"
+  path=""
+  branch=""
+
+  while IFS= read -r line; do
+    case "${line}" in
+      worktree\ *)
+        path="${line#worktree }"
+        ;;
+      branch\ refs/heads/*)
+        branch="${line#branch refs/heads/}"
+        ;;
+      "")
+        if [[ -n "${branch}" && "${branch}" == "${prefix}"* ]]; then
+          printf '%s\t%s\n' "${branch}" "${path}"
+        fi
+        path=""
+        branch=""
+        ;;
+    esac
+  done < <(git worktree list --porcelain; printf '\n')
+}
+
+base_worktree_path() {
+  local base path
+  base="$(base_branch)"
+  path="$(find_worktree_for_branch "${base}" || true)"
+  if [[ -n "${path}" ]]; then
+    printf '%s\n' "${path}"
+    return 0
+  fi
+
+  if [[ "$(current_branch)" == "${base}" ]]; then
+    repo_root
+    return 0
+  fi
+
+  return 1
+}
+
+sync_base_branch() {
+  local base base_path
+  base="$(base_branch)"
+  base_path="$(base_worktree_path || true)"
+  [[ -n "${base_path}" ]] || return 0
+
+  ensure_clean_tree "${base_path}"
+  git -C "${base_path}" switch "${base}" >/dev/null 2>&1 || true
+
+  if remote_branch_exists "origin/${base}"; then
+    git -C "${base_path}" merge --ff-only "origin/${base}" >/dev/null
+  fi
+}
+
+run_fetch() {
+  local base
+  base="$(base_branch)"
+
+  git remote get-url origin >/dev/null 2>&1 || die "origin remote is not configured"
+  git fetch origin "${base}"
+}
+
+print_help() {
+  cat <<'EOF'
+Git Vibe Flow
+
+Usage:
+  git vibe start <name>
+  git vibe finish [--local] [--sync] [name]
+  git vibe list
+  git vibe status
+  git vibe path <name>
+  git vibe prune
+  git vibe version
+  git vibe hook <pre-commit|commit-msg|pre-push> [args...]
+
+Examples:
+  git vibe start fallback-app-urls
+  git vibe finish --sync fallback-app-urls
+  git vibe finish --local fallback-app-urls
+EOF
+}
+
+command_start() {
+  local name slug branch base path
+  require_repo
+
+  [[ $# -gt 0 ]] || die "start requires a feature name"
+
+  name="$*"
+  slug="$(slug_from_name "${name}")"
+  branch="$(branch_from_slug "${slug}")"
+  base="$(base_branch)"
+  path="$(worktree_path_for_slug "${slug}")"
+
+  [[ "$(current_branch)" == "${base}" ]] || die "start from ${base}, not $(current_branch)"
+  ensure_clean_tree "$(repo_root)"
+  branch_exists "${base}" || die "base branch ${base} does not exist locally"
+
+  if branch_exists "${branch}" || remote_branch_exists "origin/${branch}"; then
+    die "branch ${branch} already exists"
+  fi
+
+  if [[ -e "${path}" ]]; then
+    die "worktree path already exists: ${path}"
+  fi
+
+  mkdir -p "$(vibe_root)"
+  git worktree add -b "${branch}" "${path}" "${base}"
+
+  say "Started ${branch}"
+  say "Path: ${path}"
+}
+
+command_finish() {
+  local name branch slug path mode sync base merged_into
+  require_repo
+
+  mode="auto"
+  sync="false"
+  name=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --local)
+        mode="local"
+        shift
+        ;;
+      --sync)
+        sync="true"
+        shift
+        ;;
+      -h|--help)
+        print_help
+        exit 0
+        ;;
+      *)
+        name="$1"
+        shift
+        ;;
+    esac
+  done
+
+  base="$(base_branch)"
+
+  if [[ -z "${name}" ]]; then
+    branch="$(current_branch)"
+    if [[ "${branch}" != "$(branch_prefix)"* ]]; then
+      die "finish needs a vibe name unless you run it from a feature worktree"
+    fi
+    slug="$(slug_from_branch "${branch}")"
+  else
+    slug="$(slug_from_name "${name}")"
+    branch="$(branch_from_slug "${slug}")"
+  fi
+
+  branch_exists "${branch}" || die "branch ${branch} does not exist locally"
+  path="$(find_worktree_for_branch "${branch}" || true)"
+  [[ -n "${path}" ]] || path="$(worktree_path_for_slug "${slug}")"
+
+  if [[ "${sync}" == "true" ]]; then
+    run_fetch
+  fi
+
+  if [[ -d "${path}" ]]; then
+    ensure_clean_tree "${path}"
+  fi
+
+  merged_into=""
+
+  if is_ancestor_of "${branch}" "${base}"; then
+    merged_into="${base}"
+  elif remote_branch_exists "origin/${base}" && is_ancestor_of "${branch}" "origin/${base}"; then
+    sync_base_branch
+    merged_into="origin/${base}"
+  elif [[ "${mode}" == "local" ]]; then
+    local base_path
+    base_path="$(base_worktree_path || true)"
+    [[ -n "${base_path}" ]] || die "could not find a worktree for ${base}"
+    ensure_clean_tree "${base_path}"
+    git -C "${base_path}" switch "${base}" >/dev/null 2>&1 || true
+    git -C "${base_path}" merge --ff-only "${branch}"
+    merged_into="${base}"
+  fi
+
+  [[ -n "${merged_into}" ]] || die "branch ${branch} is not merged into ${base}; merge it first or use --local"
+
+  if [[ -d "${path}" ]]; then
+    git worktree remove "${path}"
+  fi
+
+  git branch -d "${branch}" >/dev/null
+  git worktree prune >/dev/null 2>&1 || true
+
+  say "Finished ${branch}"
+  say "Merged into: ${merged_into}"
+}
+
+command_list() {
+  require_repo
+
+  if [[ -z "$(list_vibes_raw)" ]]; then
+    say "No active vibes"
+    return 0
+  fi
+
+  printf '%-32s %s\n' "BRANCH" "PATH"
+  while IFS=$'\t' read -r branch path; do
+    printf '%-32s %s\n' "${branch}" "${path}"
+  done < <(list_vibes_raw)
+}
+
+command_status() {
+  local base current prefix root
+  require_repo
+
+  base="$(base_branch)"
+  current="$(current_branch)"
+  prefix="$(branch_prefix)"
+  root="$(vibe_root)"
+
+  say "Repo: $(repo_root)"
+  say "Base branch: ${base}"
+  say "Current branch: ${current}"
+  say "Branch prefix: ${prefix}"
+  say "Vibe root: ${root}"
+  say ""
+  command_list
+}
+
+command_path() {
+  local slug branch path
+  require_repo
+
+  [[ $# -gt 0 ]] || die "path requires a vibe name"
+
+  slug="$(slug_from_name "$*")"
+  branch="$(branch_from_slug "${slug}")"
+  path="$(find_worktree_for_branch "${branch}" || true)"
+  printf '%s\n' "${path:-$(worktree_path_for_slug "${slug}")}"
+}
+
+command_prune() {
+  require_repo
+  git worktree prune
+  say "Pruned stale worktree metadata"
+}
+
+check_semantic_commit() {
+  local message_file subject
+  message_file="$1"
+  subject="$(grep -v '^[[:space:]]*#' "${message_file}" | head -n 1 || true)"
+  [[ -n "${subject}" ]] || exit 0
+
+  if [[ "${subject}" =~ ^(Merge|Revert|fixup!|squash!|Initial\ commit) ]]; then
+    exit 0
+  fi
+
+  if [[ "${subject}" =~ ^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert|release)(\([a-z0-9._/-]+\))?(!)?:\ .+ ]]; then
+    exit 0
+  fi
+
+  cat >&2 <<EOF
+git-vibe: commit messages must use semantic commits.
+Example: feat(cli): add finish --sync
+EOF
+  exit 1
+}
+
+hook_pre_commit() {
+  local base current allow
+  require_repo
+
+  base="$(base_branch)"
+  current="$(current_branch)"
+  allow="$(git config --bool --get vibe.allowCommitOnBase 2>/dev/null || true)"
+
+  if [[ "${current}" == "${base}" && "${VIBE_ALLOW_COMMIT_BASE:-0}" != "1" && "${allow}" != "true" ]]; then
+    die "commits on ${base} are blocked; start a vibe with: git vibe start <name>"
+  fi
+}
+
+hook_commit_msg() {
+  [[ $# -gt 0 ]] || die "commit-msg hook requires the commit message file"
+  check_semantic_commit "$1"
+}
+
+hook_pre_push() {
+  local base current allow
+  require_repo
+
+  base="$(base_branch)"
+  current="$(current_branch)"
+  allow="$(git config --bool --get vibe.allowPushOnBase 2>/dev/null || true)"
+
+  if [[ "${current}" == "${base}" && "${VIBE_ALLOW_PUSH_BASE:-0}" != "1" && "${allow}" != "true" ]]; then
+    die "pushes from ${base} are blocked; merge via PR or override with VIBE_ALLOW_PUSH_BASE=1"
+  fi
+}
+
+command_hook() {
+  [[ $# -gt 0 ]] || die "hook requires a hook name"
+
+  case "$1" in
+    pre-commit)
+      shift
+      hook_pre_commit "$@"
+      ;;
+    commit-msg)
+      shift
+      hook_commit_msg "$@"
+      ;;
+    pre-push)
+      shift
+      hook_pre_push "$@"
+      ;;
+    *)
+      die "unsupported hook: $1"
+      ;;
+  esac
+}
+
+command_version() {
+  printf '%s\n' "${VERSION}"
+}
+
+main() {
+  local command
+  command="${1:-help}"
+
+  case "${command}" in
+    help|-h|--help)
+      print_help
+      ;;
+    start)
+      shift
+      command_start "$@"
+      ;;
+    finish)
+      shift
+      command_finish "$@"
+      ;;
+    list)
+      shift
+      command_list "$@"
+      ;;
+    status)
+      shift
+      command_status "$@"
+      ;;
+    path)
+      shift
+      command_path "$@"
+      ;;
+    prune)
+      shift
+      command_prune "$@"
+      ;;
+    hook)
+      shift
+      command_hook "$@"
+      ;;
+    version)
+      shift
+      command_version "$@"
+      ;;
+    *)
+      die "unknown command: ${command}"
+      ;;
+  esac
+}
+
+main "$@"
