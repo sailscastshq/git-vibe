@@ -4,7 +4,7 @@ Git Vibe Flow is a lightweight Git workflow for teams that ship from `main`, kee
 
 The command surface is intentionally small:
 
-- `git vibe start <name>`
+- `git vibe code <name>`
 - `git vibe finish <name>`
 - `git vibe list`
 - `git vibe status`
@@ -69,6 +69,7 @@ The installer:
   - `vibe.branchPrefix=feat/`
   - `vibe.worktreeRoot=../.vibe`
 - appends `~/.git-vibe/bin` to your shell profile if it is not already managed by Git Vibe Flow
+- installs shell integration so `git vibe code ...` moves you into the new worktree and `git vibe finish ...` brings you back to the main worktree after cleanup
 
 If you want the standalone `git-vibe` binary on your shell `PATH`, the installer adds this line to your shell profile:
 
@@ -76,13 +77,21 @@ If you want the standalone `git-vibe` binary on your shell `PATH`, the installer
 export PATH="$HOME/.git-vibe/bin:$PATH"
 ```
 
-Because installers run in a child shell, they cannot modify the `PATH` of the terminal session that launched them. `git vibe ...` works immediately through the Git alias, but a fresh terminal or `source ~/.zshrc` is still needed before `git-vibe` works as a direct shell command.
+Because installers run in a child shell, they cannot modify the current terminal session that launched them. `git vibe ...` works immediately through the Git alias, but a fresh terminal or `source ~/.zshrc` is still needed before direct `git-vibe` usage and the auto-jump shell integration are available in that shell.
 
 Then verify the install:
 
 ```bash
 git vibe version
 ```
+
+After your shell profile is loaded, this should also work the way you expect:
+
+```bash
+git vibe code fallback-app-urls
+```
+
+You will land inside the worktree automatically, and if the VS Code `code` CLI is installed Git Vibe Flow will also open that worktree in VS Code. In a VS Code terminal it replaces the current window so Source Control follows the feature worktree instead of staying on the base repo.
 
 ## Workflow
 
@@ -91,7 +100,7 @@ Start a vibe from a clean `main` checkout:
 ```bash
 git switch main
 git pull --ff-only origin main
-git vibe start fallback-app-urls
+git vibe code fallback-app-urls
 ```
 
 That creates:
@@ -100,6 +109,8 @@ That creates:
 - worktree: `../.vibe/<repo>/fallback-app-urls`
 
 Do all work inside that worktree. Even fixes and urgent patches still live under `feat/*`.
+
+If you rerun `git vibe code fallback-app-urls`, Git Vibe Flow reopens the existing worktree instead of creating a duplicate branch.
 
 When the feature is merged locally:
 
@@ -122,15 +133,17 @@ git vibe finish --sync fallback-app-urls
 
 ## Commands
 
-### `git vibe start <name>`
+### `git vibe code <name>`
 
-Creates a `feat/<slug>` branch from `main` as a new worktree.
+Creates or reopens a `feat/<slug>` worktree. If the vibe does not exist yet, Git Vibe Flow creates the branch from `main` and opens it. If it already exists, Git Vibe Flow jumps back into that same worktree instead of creating a duplicate.
 
 Example:
 
 ```bash
-git vibe start add-billing-webhook
+git vibe code add-billing-webhook
 ```
+
+If the VS Code `code` CLI is available, `git vibe code ...` opens that worktree in VS Code too.
 
 ### `git vibe finish [--local] [--sync] [name]`
 

@@ -5,6 +5,12 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TMP_DIR="$(mktemp -d)"
 REPO_DIR="${TMP_DIR}/demo"
 WORKTREE_DIR="${TMP_DIR}/.vibe/demo/smoke-test"
+INSTALL_HOME="${TMP_DIR}/home"
+INSTALL_DIR="${TMP_DIR}/.git-vibe"
+SHELL_REPO_DIR="${TMP_DIR}/shell-demo"
+SHELL_WORKTREE_DIR="${TMP_DIR}/.vibe/shell-demo/shell-jump"
+EXPECTED_SHELL_REPO_DIR=""
+EXPECTED_SHELL_WORKTREE_DIR=""
 
 cleanup() {
   rm -rf "${TMP_DIR}"
@@ -31,7 +37,7 @@ git -C "${REPO_DIR}" config vibe.worktreeRoot ../.vibe
 
 (
   cd "${REPO_DIR}" >/dev/null
-  "${ROOT}/bin/git-vibe" start smoke-test >/dev/null
+  "${ROOT}/bin/git-vibe" code smoke-test >/dev/null
 )
 [[ -d "${WORKTREE_DIR}" ]] || fail "worktree was not created"
 
@@ -50,3 +56,42 @@ if git -C "${REPO_DIR}" show-ref --verify --quiet refs/heads/feat/smoke-test; th
 fi
 
 printf 'smoke: ok\n'
+
+mkdir -p "${INSTALL_HOME}"
+
+HOME="${INSTALL_HOME}" SHELL=/bin/bash GIT_VIBE_HOME="${INSTALL_DIR}" bash "${ROOT}/install.sh" >/dev/null
+
+git init "${SHELL_REPO_DIR}" >/dev/null
+git -C "${SHELL_REPO_DIR}" config user.name "Git Vibe Smoke"
+git -C "${SHELL_REPO_DIR}" config user.email "smoke@example.com"
+git -C "${SHELL_REPO_DIR}" switch -c main >/dev/null
+
+printf '# Shell Demo\n' > "${SHELL_REPO_DIR}/README.md"
+git -C "${SHELL_REPO_DIR}" add README.md
+VIBE_ALLOW_COMMIT_BASE=1 git -C "${SHELL_REPO_DIR}" commit -m "chore: initial commit" >/dev/null
+git -C "${SHELL_REPO_DIR}" config vibe.baseBranch main
+git -C "${SHELL_REPO_DIR}" config vibe.branchPrefix feat/
+git -C "${SHELL_REPO_DIR}" config vibe.worktreeRoot ../.vibe
+EXPECTED_SHELL_REPO_DIR="$(cd "${SHELL_REPO_DIR}" && pwd -P)"
+
+AUTO_CD_OUTPUT="$(HOME="${INSTALL_HOME}" SHELL=/bin/bash bash -lc '
+  source ~/.bashrc
+  cd "'"${SHELL_REPO_DIR}"'"
+  git vibe code shell-jump >/dev/null
+  pwd -P
+')"
+
+EXPECTED_SHELL_WORKTREE_DIR="$(cd "${SHELL_WORKTREE_DIR}" && pwd -P)"
+
+[[ "${AUTO_CD_OUTPUT}" == "${EXPECTED_SHELL_WORKTREE_DIR}" ]] || fail "shell integration did not move into the new worktree"
+
+FINISH_OUTPUT="$(HOME="${INSTALL_HOME}" SHELL=/bin/bash bash -lc '
+  source ~/.bashrc
+  cd "'"${SHELL_REPO_DIR}"'"
+  git vibe finish --local shell-jump >/dev/null
+  pwd -P
+')"
+
+[[ "${FINISH_OUTPUT}" == "${EXPECTED_SHELL_REPO_DIR}" ]] || fail "shell integration did not return to the base worktree after finish"
+
+printf 'smoke: shell integration ok\n'
