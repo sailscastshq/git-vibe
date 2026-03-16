@@ -7,6 +7,7 @@ The command surface is intentionally small:
 - `git vibe code <name>`
 - `git vibe finish <name>`
 - `git vibe release <version>`
+- `git vibe release <version> --push`
 - `git vibe list`
 - `git vibe status`
 - `git vibe prune`
@@ -164,7 +165,7 @@ Finishes a vibe safely.
 
 Run it with no name from inside a feature worktree to finish the current vibe.
 
-### `git vibe release <version>`
+### `git vibe release <version> [--push]`
 
 Cuts a release directly from `main`. Git Vibe Flow updates the plain-text `VERSION` file, creates a `chore(release): vX.Y.Z` commit on `main`, and adds an annotated `vX.Y.Z` tag.
 
@@ -183,11 +184,13 @@ The command is intentionally narrow:
 - it expects a plain-text version file at `VERSION`
 - it creates the commit and tag locally
 
-After that, push the release explicitly:
+If you want Git Vibe Flow to push the release for you, use:
 
 ```bash
-VIBE_ALLOW_PUSH_BASE=1 git push origin main --tags
+git vibe release 0.0.2 --push
 ```
+
+That uses the maintainer override internally, so it still works even in repos that explicitly block raw `main` pushes.
 
 ### `git vibe list`
 
@@ -237,9 +240,15 @@ Accepted examples:
 
 ### `pre-push`
 
-Blocks direct pushes from the base branch by default.
+Allows pushes from the base branch by default.
 
-Override when you intentionally need to push `main`:
+If a repo wants Git Vibe Flow to block raw `main` pushes again, opt into that explicitly:
+
+```bash
+git config vibe.disallowPushOnBase true
+```
+
+Then the escape hatch is still:
 
 ```bash
 VIBE_ALLOW_PUSH_BASE=1 git push origin main
@@ -263,6 +272,12 @@ Useful repo-level override example:
 git config vibe.worktreeRoot ../worktrees
 ```
 
+To block raw `main` pushes in a specific repo:
+
+```bash
+git config vibe.disallowPushOnBase true
+```
+
 Release command example:
 
 ```bash
@@ -280,7 +295,7 @@ The release flow is:
 1. make sure every feature for the release is already merged into `main`
 2. switch to `main`
 3. fast-forward to the remote
-4. run `git vibe release <version>`
+4. run `git vibe release <version>` or `git vibe release <version> --push`
 5. push `main` and the tag
 
 For Git Vibe Flow `0.0.2`, the commands are:
@@ -288,11 +303,10 @@ For Git Vibe Flow `0.0.2`, the commands are:
 ```bash
 git switch main
 git pull --ff-only origin main
-git vibe release 0.0.2
-VIBE_ALLOW_PUSH_BASE=1 git push origin main --tags
+git vibe release 0.0.2 --push
 ```
 
-Under the hood, `git vibe release 0.0.2` writes `0.0.2` to `VERSION`, commits `chore(release): v0.0.2`, and creates the annotated tag `v0.0.2` on `main`.
+Under the hood, `git vibe release 0.0.2 --push` writes `0.0.2` to `VERSION`, commits `chore(release): v0.0.2`, creates the annotated tag `v0.0.2` on `main`, and pushes both `main` and the tag to `origin`.
 
 ## Development
 
