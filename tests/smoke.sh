@@ -5,6 +5,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TMP_DIR="$(mktemp -d)"
 REPO_DIR="${TMP_DIR}/demo"
 WORKTREE_DIR="${TMP_DIR}/.vibe/demo/smoke-test"
+WORKTREE_FINISH_DIR="${TMP_DIR}/.vibe/demo/worktree-finish"
 INSTALL_HOME="${TMP_DIR}/home"
 INSTALL_DIR="${TMP_DIR}/.git-vibe"
 SHELL_REPO_DIR="${TMP_DIR}/shell-demo"
@@ -56,6 +57,28 @@ if git -C "${REPO_DIR}" show-ref --verify --quiet refs/heads/feat/smoke-test; th
 fi
 
 printf 'smoke: ok\n'
+
+(
+  cd "${REPO_DIR}" >/dev/null
+  "${ROOT}/bin/git-vibe" code worktree-finish >/dev/null
+)
+[[ -d "${WORKTREE_FINISH_DIR}" ]] || fail "worktree finish path was not created"
+
+printf '\nWorktree finish change\n' >> "${WORKTREE_FINISH_DIR}/README.md"
+git -C "${WORKTREE_FINISH_DIR}" add README.md
+git -C "${WORKTREE_FINISH_DIR}" commit -m "feat: update readme from worktree" >/dev/null
+
+(
+  cd "${WORKTREE_FINISH_DIR}" >/dev/null
+  "${ROOT}/bin/git-vibe" finish --local >/dev/null
+)
+
+[[ ! -d "${WORKTREE_FINISH_DIR}" ]] || fail "worktree still exists after finishing from inside the vibe"
+if git -C "${REPO_DIR}" show-ref --verify --quiet refs/heads/feat/worktree-finish; then
+  fail "feature branch still exists after finishing from inside the vibe"
+fi
+
+printf 'smoke: worktree finish ok\n'
 
 mkdir -p "${INSTALL_HOME}"
 
