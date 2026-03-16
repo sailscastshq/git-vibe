@@ -4,6 +4,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TMP_DIR="$(mktemp -d)"
 REPO_DIR="${TMP_DIR}/demo"
+ORIGIN_DIR="${TMP_DIR}/origin.git"
+HOOKS_DIR="${TMP_DIR}/hooks"
 WORKTREE_DIR="${TMP_DIR}/.vibe/demo/smoke-test"
 WORKTREE_FINISH_DIR="${TMP_DIR}/.vibe/demo/worktree-finish"
 INSTALL_HOME="${TMP_DIR}/home"
@@ -24,17 +26,31 @@ fail() {
   exit 1
 }
 
+mkdir -p "${HOOKS_DIR}"
+for hook in pre-commit commit-msg pre-push; do
+  cat > "${HOOKS_DIR}/${hook}" <<EOF
+#!/usr/bin/env bash
+exec "${ROOT}/bin/git-vibe" hook ${hook} "\$@"
+EOF
+  chmod +x "${HOOKS_DIR}/${hook}"
+done
+
 git init "${REPO_DIR}" >/dev/null
 git -C "${REPO_DIR}" config user.name "Git Vibe Smoke"
 git -C "${REPO_DIR}" config user.email "smoke@example.com"
+git -C "${REPO_DIR}" config core.hooksPath "${HOOKS_DIR}"
 git -C "${REPO_DIR}" switch -c main >/dev/null
+git init --bare "${ORIGIN_DIR}" >/dev/null
 
 printf '# Demo\n' > "${REPO_DIR}/README.md"
 git -C "${REPO_DIR}" add README.md
 VIBE_ALLOW_COMMIT_BASE=1 git -C "${REPO_DIR}" commit -m "chore: initial commit" >/dev/null
+git -C "${REPO_DIR}" remote add origin "${ORIGIN_DIR}"
 git -C "${REPO_DIR}" config vibe.baseBranch main
 git -C "${REPO_DIR}" config vibe.branchPrefix feat/
 git -C "${REPO_DIR}" config vibe.worktreeRoot ../.vibe
+git -C "${REPO_DIR}" config vibe.disallowPushOnBase false
+git -C "${REPO_DIR}" push -u origin main >/dev/null
 
 (
   cd "${REPO_DIR}" >/dev/null
@@ -86,18 +102,30 @@ VIBE_ALLOW_COMMIT_BASE=1 git -C "${REPO_DIR}" commit -m "chore: add version file
 
 (
   cd "${REPO_DIR}" >/dev/null
-  "${ROOT}/bin/git-vibe" release 0.1.0 >/dev/null
+  "${ROOT}/bin/git-vibe" release 0.1.0 --push >/dev/null
 )
 
 [[ "$(<"${REPO_DIR}/VERSION")" == "0.1.0" ]] || fail "release did not update VERSION"
 [[ "$(git -C "${REPO_DIR}" log -1 --pretty=%s)" == "chore(release): v0.1.0" ]] || fail "release did not create the expected commit"
 [[ "$(git -C "${REPO_DIR}" tag --list "v0.1.0")" == "v0.1.0" ]] || fail "release did not create the expected tag"
+git --git-dir="${ORIGIN_DIR}" show-ref --verify --quiet refs/tags/v0.1.0 || fail "release --push did not push the tag"
+[[ "$(git -C "${REPO_DIR}" rev-parse HEAD)" == "$(git --git-dir="${ORIGIN_DIR}" rev-parse refs/heads/main)" ]] || fail "release --push did not push main"
 
 printf 'smoke: release ok\n'
 
 mkdir -p "${INSTALL_HOME}"
 
 HOME="${INSTALL_HOME}" SHELL=/bin/bash GIT_VIBE_HOME="${INSTALL_DIR}" bash "${ROOT}/install.sh" >/dev/null
+
+ALIAS_WORKTREE_DIR="${TMP_DIR}/.vibe/demo/alias-shortcut"
+
+(
+  cd "${REPO_DIR}" >/dev/null
+  HOME="${INSTALL_HOME}" git vc alias-shortcut >/dev/null
+)
+[[ -d "${ALIAS_WORKTREE_DIR}" ]] || fail "git vc did not create the expected worktree"
+git -C "${REPO_DIR}" worktree remove "${ALIAS_WORKTREE_DIR}" >/dev/null
+git -C "${REPO_DIR}" branch -d feat/alias-shortcut >/dev/null
 
 git init "${SHELL_REPO_DIR}" >/dev/null
 git -C "${SHELL_REPO_DIR}" config user.name "Git Vibe Smoke"
@@ -115,7 +143,7 @@ EXPECTED_SHELL_REPO_DIR="$(cd "${SHELL_REPO_DIR}" && pwd -P)"
 AUTO_CD_OUTPUT="$(HOME="${INSTALL_HOME}" SHELL=/bin/bash bash -lc '
   source ~/.bashrc
   cd "'"${SHELL_REPO_DIR}"'"
-  git vibe code shell-jump >/dev/null
+  git vc shell-jump >/dev/null
   pwd -P
 ')"
 

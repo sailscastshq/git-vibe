@@ -135,6 +135,24 @@ tag_exists() {
   git show-ref --verify --quiet "refs/tags/$1"
 }
 
+push_blocked_on_base() {
+  local disallow allow
+  disallow="$(git config --bool --get vibe.disallowPushOnBase 2>/dev/null || true)"
+  if [[ "${disallow}" == "true" ]]; then
+    printf '%s\n' "true"
+    return 0
+  fi
+
+  # Backward compatibility for older installs that used allowPushOnBase.
+  allow="$(git config --bool --get vibe.allowPushOnBase 2>/dev/null || true)"
+  if [[ "${allow}" == "false" ]]; then
+    printf '%s\n' "true"
+    return 0
+  fi
+
+  printf '%s\n' "false"
+}
+
 remote_branch_exists() {
   git show-ref --verify --quiet "refs/remotes/$1"
 }
@@ -235,6 +253,14 @@ run_fetch() {
   git fetch origin "${base}"
 }
 
+push_base_branch_and_tags() {
+  local base
+  base="$1"
+
+  git remote get-url origin >/dev/null 2>&1 || die "origin remote is not configured"
+  VIBE_ALLOW_PUSH_BASE=1 git push origin "${base}" --tags
+}
+
 normalize_release_version() {
   local normalized
   normalized="${1#v}"
@@ -248,12 +274,12 @@ normalize_release_version() {
 
 print_help() {
   cat <<'EOF'
-Git Vibe Flow
+Git Vibe
 
 Usage:
   git vibe code <name>
   git vibe finish [--local] [--sync] [name]
-  git vibe release <version>
+  git vibe release <version> [--push]
   git vibe list
   git vibe status
   git vibe path <name>
@@ -267,6 +293,7 @@ Examples:
   git vibe finish --sync fallback-app-urls
   git vibe finish --local fallback-app-urls
   git vibe release 0.0.2
+  git vibe release 0.0.2 --push
 EOF
 }
 
@@ -483,18 +510,39 @@ command_finish() {
 }
 
 command_release() {
-  local raw_version version tag base version_file version_path
+  local raw_version version tag base version_file version_path push_after_release
   require_repo
 
-  [[ $# -gt 0 ]] || die "release requires a version"
-  [[ $# -eq 1 ]] || die "release accepts exactly one version"
+  raw_version=""
+  push_after_release="false"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --push)
+        push_after_release="true"
+        ;;
+      -h|--help)
+        print_help
+        exit 0
+        ;;
+      --*)
+        die "unknown flag for release: $1"
+        ;;
+      *)
+        [[ -z "${raw_version}" ]] || die "release accepts exactly one version"
+        raw_version="$1"
+        ;;
+    esac
+    shift
+  done
+
+  [[ -n "${raw_version}" ]] || die "release requires a version"
 
   base="$(base_branch)"
   [[ "$(current_branch)" == "${base}" ]] || die "release must be run from ${base}"
 
   ensure_clean_tree "$(repo_root)"
 
-  raw_version="$1"
   version="$(normalize_release_version "${raw_version}")"
   tag="v${version}"
   version_file="$(release_version_file)"
@@ -513,11 +561,21 @@ command_release() {
   VIBE_ALLOW_COMMIT_BASE=1 git commit -m "chore(release): ${tag}" >/dev/null
   git tag -a "${tag}" -m "${tag}"
 
+  if [[ "${push_after_release}" == "true" ]]; then
+    push_base_branch_and_tags "${base}"
+  fi
+
   say "Released ${tag}"
   say "Version file: ${version_file}"
-  say ""
-  say "Next:"
-  say "  VIBE_ALLOW_PUSH_BASE=1 git push origin ${base} --tags"
+
+  if [[ "${push_after_release}" == "true" ]]; then
+    say "Pushed: origin/${base} and ${tag}"
+  else
+    say ""
+    say "Next:"
+    say "  git vibe release ${version} --push"
+    say "  or: git push origin ${base} --tags"
+  fi
 }
 
 command_list() {
@@ -610,14 +668,14 @@ hook_commit_msg() {
 }
 
 hook_pre_push() {
-  local base current allow
+  local base current blocked
   require_repo
 
   base="$(base_branch)"
   current="$(current_branch)"
-  allow="$(git config --bool --get vibe.allowPushOnBase 2>/dev/null || true)"
+  blocked="$(push_blocked_on_base)"
 
-  if [[ "${current}" == "${base}" && "${VIBE_ALLOW_PUSH_BASE:-0}" != "1" && "${allow}" != "true" ]]; then
+  if [[ "${current}" == "${base}" && "${VIBE_ALLOW_PUSH_BASE:-0}" != "1" && "${blocked}" == "true" ]]; then
     die "pushes from ${base} are blocked; merge via PR or override with VIBE_ALLOW_PUSH_BASE=1"
   fi
 }
