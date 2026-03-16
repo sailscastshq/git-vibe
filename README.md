@@ -44,6 +44,12 @@ Quick install:
 curl -fsSL https://raw.githubusercontent.com/sailscastshq/git-vibe/main/install.sh | bash
 ```
 
+Install the Git Vibe Flow skill too:
+
+```bash
+npx skills add sailscastshq/git-vibe
+```
+
 To install a specific version, pin the ref:
 
 ```bash
