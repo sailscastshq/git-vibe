@@ -263,6 +263,7 @@ Usage:
 
 Examples:
   git vibe code fallback-app-urls
+  git vibe finish fallback-app-urls
   git vibe finish --sync fallback-app-urls
   git vibe finish --local fallback-app-urls
   git vibe release 0.0.2

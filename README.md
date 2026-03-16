@@ -119,6 +119,12 @@ When the feature is merged locally:
 git vibe finish --local fallback-app-urls
 ```
 
+When you want the default auto-cleanup behavior:
+
+```bash
+git vibe finish fallback-app-urls
+```
+
 When the feature was merged remotely through a PR:
 
 ```bash
@@ -150,9 +156,11 @@ If the VS Code `code` CLI is available, `git vibe code ...` opens that worktree 
 
 Finishes a vibe safely.
 
+- With no flag, `git vibe finish <name>` uses the default auto mode. It checks local `main` and your current `origin/main` refs, then cleans up if the branch is already merged.
 - If the branch is already merged into local `main`, it cleans up the worktree and deletes the branch.
 - If the branch is merged into `origin/main`, it fast-forwards local `main`, then cleans up.
 - If you pass `--local`, it merges the branch into local `main` with `--ff-only`, then cleans up.
+- If you pass `--sync`, it fetches `origin/main` first, then runs the same cleanup check with fresh remote refs.
 
 Run it with no name from inside a feature worktree to finish the current vibe.
 

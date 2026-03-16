@@ -51,6 +51,12 @@ Finish a vibe with a local fast-forward merge:
 git vibe finish --local <name>
 ```
 
+Finish a vibe in the default auto mode:
+
+```bash
+git vibe finish <name>
+```
+
 Cut a release directly from `main`:
 
 ```bash
@@ -116,6 +122,14 @@ VIBE_ALLOW_PUSH_BASE=1 git push origin main --tags
 ```
 
 The release command updates the plain-text `VERSION` file, creates `chore(release): vX.Y.Z` on `main`, and adds the annotated `vX.Y.Z` tag.
+
+## Finish modes
+
+- `git vibe finish <name>` is the default auto mode. It checks whether the vibe is already merged into local `main` or your current `origin/main` refs, then cleans up if it is.
+- `git vibe finish --sync <name>` fetches `origin/main` first, then runs the same merge check. Use this after a PR was merged on GitHub and your local refs may be stale.
+- `git vibe finish --local <name>` merges the vibe into local `main` with `--ff-only`, then cleans up.
+
+Keep `auto` as the default. It works offline, it does not force a network call, and it does not silently merge into `main`. Use `--sync` when you want fresh remote knowledge and `--local` when you want Git Vibe to perform the merge itself.
 
 ## Install
 
