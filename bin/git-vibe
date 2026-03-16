@@ -51,6 +51,40 @@ branch_prefix() {
   printf '%s\n' "${configured:-feat/}"
 }
 
+open_editor_mode() {
+  local configured
+  configured="$(git_config_get vibe.openEditor)"
+  printf '%s\n' "${configured:-auto}"
+}
+
+validate_open_editor_mode() {
+  case "$1" in
+    auto|always|never)
+      ;;
+    *)
+      die "invalid vibe.openEditor: $1 (expected auto, always, or never)"
+      ;;
+  esac
+}
+
+should_open_editor() {
+  local mode
+  mode="$1"
+  validate_open_editor_mode "${mode}"
+
+  case "${mode}" in
+    always)
+      return 0
+      ;;
+    never)
+      return 1
+      ;;
+    auto)
+      [[ -t 0 && -t 1 ]]
+      ;;
+  esac
+}
+
 release_version_file() {
   local configured root
   configured="$(git_config_get vibe.releaseVersionFile)"
@@ -285,7 +319,7 @@ print_help() {
 Git Vibe
 
 Usage:
-  git vibe code <name>
+  git vibe code [--editor|--no-editor] <name>
   git vibe finish [--local] [--sync] [name]
   git vibe release <version> [--push]
   git vibe list
@@ -297,6 +331,7 @@ Usage:
 
 Examples:
   git vibe code fallback-app-urls
+  git vibe code --no-editor fallback-app-urls
   git vibe finish fallback-app-urls
   git vibe finish --sync fallback-app-urls
   git vibe finish --local fallback-app-urls
@@ -325,12 +360,12 @@ open_editor_for_path() {
 }
 
 command_code() {
-  local name slug branch base path shell_output open_editor action base_path
+  local name slug branch base path shell_output open_editor action base_path editor_mode
   local -a name_parts
   require_repo
 
   shell_output="false"
-  open_editor="true"
+  open_editor=""
   name_parts=()
 
   while [[ $# -gt 0 ]]; do
@@ -338,8 +373,11 @@ command_code() {
       --shell-output)
         shell_output="true"
         ;;
+      --editor)
+        open_editor="always"
+        ;;
       --no-editor)
-        open_editor="false"
+        open_editor="never"
         ;;
       -h|--help)
         print_help
@@ -399,7 +437,12 @@ command_code() {
   say "${action} ${branch}"
   say "Path: ${path}"
 
-  if [[ "${open_editor}" == "true" ]]; then
+  editor_mode="$(open_editor_mode)"
+  if [[ -n "${open_editor}" ]]; then
+    editor_mode="${open_editor}"
+  fi
+
+  if should_open_editor "${editor_mode}"; then
     open_editor_for_path "${path}"
   fi
 
@@ -615,19 +658,22 @@ command_list() {
 }
 
 command_status() {
-  local base current prefix root
+  local base current prefix root editor_mode
   require_repo
 
   base="$(base_branch)"
   current="$(current_branch)"
   prefix="$(branch_prefix)"
   root="$(vibe_root)"
+  editor_mode="$(open_editor_mode)"
+  validate_open_editor_mode "${editor_mode}"
 
   say "Repo: $(repo_root)"
   say "Base branch: ${base}"
   say "Current branch: ${current}"
   say "Branch prefix: ${prefix}"
   say "Vibe root: ${root}"
+  say "Open editor: ${editor_mode}"
   say ""
   command_list
 }

@@ -8,10 +8,16 @@ ORIGIN_DIR="${TMP_DIR}/origin.git"
 HOOKS_DIR="${TMP_DIR}/hooks"
 WORKTREE_DIR="${TMP_DIR}/.vibe/demo/smoke-test"
 WORKTREE_FINISH_DIR="${TMP_DIR}/.vibe/demo/worktree-finish"
+AUTO_EDITOR_WORKTREE_DIR="${TMP_DIR}/.vibe/demo/auto-editor"
+ALWAYS_EDITOR_WORKTREE_DIR="${TMP_DIR}/.vibe/demo/always-editor"
+NEVER_EDITOR_WORKTREE_DIR="${TMP_DIR}/.vibe/demo/never-editor"
+FORCED_EDITOR_WORKTREE_DIR="${TMP_DIR}/.vibe/demo/forced-editor"
 INSTALL_HOME="${TMP_DIR}/home"
 INSTALL_DIR="${TMP_DIR}/.git-vibe"
 SHELL_REPO_DIR="${TMP_DIR}/shell-demo"
 SHELL_WORKTREE_DIR="${TMP_DIR}/.vibe/shell-demo/shell-jump"
+FAKE_BIN_DIR="${TMP_DIR}/fake-bin"
+CODE_LOG="${TMP_DIR}/code.log"
 EXPECTED_SHELL_REPO_DIR=""
 EXPECTED_SHELL_WORKTREE_DIR=""
 
@@ -25,6 +31,13 @@ fail() {
   printf 'smoke: %s\n' "$*" >&2
   exit 1
 }
+
+mkdir -p "${FAKE_BIN_DIR}"
+cat > "${FAKE_BIN_DIR}/code" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "${CODE_LOG}"
+EOF
+chmod +x "${FAKE_BIN_DIR}/code"
 
 mkdir -p "${HOOKS_DIR}"
 for hook in pre-commit commit-msg pre-push; do
@@ -95,6 +108,60 @@ if git -C "${REPO_DIR}" show-ref --verify --quiet refs/heads/feat/worktree-finis
 fi
 
 printf 'smoke: worktree finish ok\n'
+
+git -C "${REPO_DIR}" config vibe.openEditor auto
+: > "${CODE_LOG}"
+
+(
+  cd "${REPO_DIR}" >/dev/null
+  PATH="${FAKE_BIN_DIR}:$PATH" "${ROOT}/bin/git-vibe" code auto-editor >/dev/null
+)
+
+[[ -d "${AUTO_EDITOR_WORKTREE_DIR}" ]] || fail "auto editor worktree was not created"
+[[ ! -s "${CODE_LOG}" ]] || fail "auto editor mode should skip editor launch in non-interactive runs"
+git -C "${REPO_DIR}" worktree remove "${AUTO_EDITOR_WORKTREE_DIR}" >/dev/null
+git -C "${REPO_DIR}" branch -d feat/auto-editor >/dev/null
+
+git -C "${REPO_DIR}" config vibe.openEditor always
+: > "${CODE_LOG}"
+
+(
+  cd "${REPO_DIR}" >/dev/null
+  PATH="${FAKE_BIN_DIR}:$PATH" "${ROOT}/bin/git-vibe" code always-editor >/dev/null
+)
+
+[[ -d "${ALWAYS_EDITOR_WORKTREE_DIR}" ]] || fail "always editor worktree was not created"
+[[ -s "${CODE_LOG}" ]] || fail "always editor mode should launch the editor"
+git -C "${REPO_DIR}" worktree remove "${ALWAYS_EDITOR_WORKTREE_DIR}" >/dev/null
+git -C "${REPO_DIR}" branch -d feat/always-editor >/dev/null
+
+git -C "${REPO_DIR}" config vibe.openEditor never
+: > "${CODE_LOG}"
+
+(
+  cd "${REPO_DIR}" >/dev/null
+  PATH="${FAKE_BIN_DIR}:$PATH" "${ROOT}/bin/git-vibe" code never-editor >/dev/null
+)
+
+[[ -d "${NEVER_EDITOR_WORKTREE_DIR}" ]] || fail "never editor worktree was not created"
+[[ ! -s "${CODE_LOG}" ]] || fail "never editor mode should skip editor launch"
+git -C "${REPO_DIR}" worktree remove "${NEVER_EDITOR_WORKTREE_DIR}" >/dev/null
+git -C "${REPO_DIR}" branch -d feat/never-editor >/dev/null
+
+: > "${CODE_LOG}"
+
+(
+  cd "${REPO_DIR}" >/dev/null
+  PATH="${FAKE_BIN_DIR}:$PATH" "${ROOT}/bin/git-vibe" code --editor forced-editor >/dev/null
+)
+
+[[ -d "${FORCED_EDITOR_WORKTREE_DIR}" ]] || fail "forced editor worktree was not created"
+[[ -s "${CODE_LOG}" ]] || fail "--editor should override vibe.openEditor=never"
+git -C "${REPO_DIR}" worktree remove "${FORCED_EDITOR_WORKTREE_DIR}" >/dev/null
+git -C "${REPO_DIR}" branch -d feat/forced-editor >/dev/null
+git -C "${REPO_DIR}" config --unset vibe.openEditor
+
+printf 'smoke: editor modes ok\n'
 
 (
   cd "${REPO_DIR}" >/dev/null
