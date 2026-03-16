@@ -1,6 +1,6 @@
 # Git Vibe Flow
 
-Git Vibe Flow is a lightweight Git workflow for teams that ship from `main`, work in `feat/*` branches, and want worktrees to be the default instead of an advanced trick.
+Git Vibe Flow is a lightweight Git workflow for teams that ship from `main`, keep all work on `feat/*` branches, and treat every `feat/*` branch as a worktree from the moment it is created.
 
 The command surface is intentionally small:
 
@@ -10,19 +10,21 @@ The command surface is intentionally small:
 - `git vibe status`
 - `git vibe prune`
 
-Under the hood, every vibe is a short-lived `feat/*` branch paired with its own worktree. That gives humans and AI agents isolated lanes to work in without polluting `main`.
+Under the hood, every vibe is a short-lived `feat/*` branch that is created as its own worktree. That gives humans and AI agents isolated lanes to work in without polluting `main`.
 
 ## Why Git Vibe Flow
 
 Classic `git-flow` assumes a world with long-lived `develop` branches, release branches, and slow integration. Git Vibe Flow keeps the parts that still matter and drops the ceremony:
 
 - `main` is the only long-lived branch.
-- Every task starts as `feat/<slug>`.
-- Every feature gets a worktree by default.
+- Every work branch starts as `feat/<slug>`, including fixes and urgent patches.
+- Every `feat/*` branch is created as its own worktree.
 - `main` stays clean and deployable.
 - Releases are cut directly from `main` with a version bump commit and a tag.
 
 This is a better fit for fast-moving teams and AI-assisted development, where multiple experiments can happen in parallel and isolation matters more than branch hierarchy.
+
+Git Vibe Flow is also built for AI orchestration. When every `feat/*` branch gets its own worktree by default, you can safely run multiple agents, terminals, test runs, and experiments side by side without branch hopping, stash juggling, or cross-task contamination.
 
 ## What v0.0.1 includes
 
@@ -32,14 +34,23 @@ This is a better fit for fast-moving teams and AI-assisted development, where mu
 - Semantic commit enforcement
 - Base-branch protection against direct commits and pushes
 - Default worktree layout under `../.vibe/<repo>/<slug>`
+- A simple workflow for human and AI parallel work without `develop`, `fix/*`, or `release/*` branches
 
 ## Install
 
-Clone the repo somewhere you keep tooling, then run:
+Quick install:
 
 ```bash
-./install.sh
+curl -fsSL https://raw.githubusercontent.com/sailscastshq/git-vibe/main/install.sh | bash
 ```
+
+To install a specific version, pin the ref:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/sailscastshq/git-vibe/v0.0.1/install.sh | GIT_VIBE_REF=v0.0.1 bash
+```
+
+If you are working from a local checkout, `./install.sh` still works.
 
 The installer:
 
@@ -78,7 +89,7 @@ That creates:
 - branch: `feat/fallback-app-urls`
 - worktree: `../.vibe/<repo>/fallback-app-urls`
 
-Do all work inside that worktree.
+Do all work inside that worktree. Even fixes and urgent patches still live under `feat/*`.
 
 When the feature is merged locally:
 
@@ -103,7 +114,7 @@ git vibe finish --sync fallback-app-urls
 
 ### `git vibe start <name>`
 
-Creates a `feat/<slug>` branch from `main` and attaches it to a new worktree.
+Creates a `feat/<slug>` branch from `main` as a new worktree.
 
 Example:
 
@@ -158,6 +169,8 @@ VIBE_ALLOW_COMMIT_BASE=1 git commit -m "chore(release): v0.0.1"
 ### `commit-msg`
 
 Requires semantic commit messages.
+
+Git Vibe Flow standardizes branch names, not commit types. Branches always stay under `feat/*`, but commits can still use semantic types like `feat:`, `fix:`, `docs:`, `chore:`, and `test:`.
 
 Accepted examples:
 
