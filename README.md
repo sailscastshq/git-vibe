@@ -56,19 +56,23 @@ The installer:
 
 - copies `git-vibe` into `~/.git-vibe/bin`
 - installs global Git hooks into `~/.git-vibe/hooks`
+- creates a global Git alias so `git vibe` works even before a shell reload
 - sets `core.hooksPath` globally
 - seeds these defaults:
   - `vibe.baseBranch=main`
   - `vibe.branchPrefix=feat/`
   - `vibe.worktreeRoot=../.vibe`
+- appends `~/.git-vibe/bin` to your shell profile if it is not already managed by Git Vibe Flow
 
-If `~/.git-vibe/bin` is not on your `PATH`, add this to your shell profile:
+If you want the standalone `git-vibe` binary on your shell `PATH`, the installer adds this line to your shell profile:
 
 ```bash
 export PATH="$HOME/.git-vibe/bin:$PATH"
 ```
 
-Then reload your shell and verify the install:
+Because installers run in a child shell, they cannot modify the `PATH` of the terminal session that launched them. `git vibe ...` works immediately through the Git alias, but a fresh terminal or `source ~/.zshrc` is still needed before `git-vibe` works as a direct shell command.
+
+Then verify the install:
 
 ```bash
 git vibe version

@@ -24,7 +24,7 @@ git -C "${REPO_DIR}" switch -c main >/dev/null
 
 printf '# Demo\n' > "${REPO_DIR}/README.md"
 git -C "${REPO_DIR}" add README.md
-git -C "${REPO_DIR}" commit -m "chore: initial commit" >/dev/null
+VIBE_ALLOW_COMMIT_BASE=1 git -C "${REPO_DIR}" commit -m "chore: initial commit" >/dev/null
 git -C "${REPO_DIR}" config vibe.baseBranch main
 git -C "${REPO_DIR}" config vibe.branchPrefix feat/
 git -C "${REPO_DIR}" config vibe.worktreeRoot ../.vibe
