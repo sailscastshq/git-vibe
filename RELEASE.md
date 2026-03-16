@@ -22,7 +22,7 @@ Classic `git-flow` was built for a different world. Git Vibe Flow is for teams t
 - `finish` can clean up after a remote PR merge or perform a local fast-forward merge
 - global hooks protect `main` from direct commits and pushes
 - semantic commit messages are enforced
-- releases are cut directly from `main` with a version bump commit and an annotated tag
+- releases are cut directly from `main` with a release commit and an annotated tag
 
 ## Included in 0.0.1
 

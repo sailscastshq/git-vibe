@@ -22,7 +22,7 @@ Classic `git-flow` assumes a world with long-lived `develop` branches, release b
 - Every work branch starts as `feat/<slug>`, including fixes and urgent patches.
 - Every `feat/*` branch is created as its own worktree.
 - `main` stays clean and deployable.
-- Releases are cut directly from `main` with a version bump commit and a tag.
+- Releases are cut directly from `main` with a release commit and a tag.
 
 This is a better fit for fast-moving teams and AI-assisted development, where multiple experiments can happen in parallel and isolation matters more than branch hierarchy.
 
@@ -175,7 +175,7 @@ Run it with no name from inside a feature worktree to finish the current vibe.
 
 ### `git vibe release <version> [--push]`
 
-Cuts a release directly from `main`. Git Vibe updates the plain-text `VERSION` file, creates a `chore(release): vX.Y.Z` commit on `main`, and adds an annotated `vX.Y.Z` tag.
+Cuts a release directly from `main`. Git Vibe creates a `chore(release): vX.Y.Z` commit on `main` and adds an annotated `vX.Y.Z` tag. If the repo already has a top-level `VERSION` file, or you configure `vibe.releaseVersionFile`, Git Vibe updates that plain-text file too.
 
 Example:
 
@@ -189,8 +189,8 @@ The command is intentionally narrow:
 
 - it must be run from `main`
 - the working tree must be clean
-- it expects a plain-text version file at `VERSION`
 - it creates the commit and tag locally
+- it only auto-updates plain-text version files
 
 If you want Git Vibe to push the release for you, use:
 
@@ -292,7 +292,7 @@ Release command example:
 git config vibe.releaseVersionFile VERSION
 ```
 
-`git vibe release` expects that file to be a plain-text file containing only the version string.
+`git vibe release` only auto-manages plain-text version files containing the version string by itself. If your project keeps its version in `package.json` or somewhere else, bump that file yourself before cutting the release. Without this config, Git Vibe auto-updates a top-level `VERSION` file when one already exists and otherwise skips version-file changes.
 
 ## Release and tagging
 
@@ -314,7 +314,7 @@ git pull --ff-only origin main
 git vibe release 0.0.2 --push
 ```
 
-Under the hood, `git vibe release 0.0.2 --push` writes `0.0.2` to `VERSION`, commits `chore(release): v0.0.2`, creates the annotated tag `v0.0.2` on `main`, and pushes both `main` and the tag to `origin`.
+Under the hood, `git vibe release 0.0.2 --push` creates `chore(release): v0.0.2`, creates the annotated tag `v0.0.2` on `main`, and pushes both `main` and the tag to `origin`. If Git Vibe is managing a plain-text version file for that repo, it writes `0.0.2` there first.
 
 ## Development
 

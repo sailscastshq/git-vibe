@@ -52,9 +52,17 @@ branch_prefix() {
 }
 
 release_version_file() {
-  local configured
+  local configured root
   configured="$(git_config_get vibe.releaseVersionFile)"
-  printf '%s\n' "${configured:-VERSION}"
+  if [[ -n "${configured}" ]]; then
+    printf '%s\n' "${configured}"
+    return 0
+  fi
+
+  root="$(repo_root)"
+  if [[ -f "${root}/VERSION" ]]; then
+    printf '%s\n' "VERSION"
+  fi
 }
 
 worktree_root_setting() {
@@ -510,11 +518,12 @@ command_finish() {
 }
 
 command_release() {
-  local raw_version version tag base version_file version_path push_after_release
+  local raw_version version tag base version_file version_path push_after_release version_file_status
   require_repo
 
   raw_version=""
   push_after_release="false"
+  version_file_status="none"
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -546,19 +555,22 @@ command_release() {
   version="$(normalize_release_version "${raw_version}")"
   tag="v${version}"
   version_file="$(release_version_file)"
-  version_path="$(repo_root)/${version_file}"
-
-  [[ -f "${version_path}" ]] || die "release version file not found: ${version_file}"
   tag_exists "${tag}" && die "tag ${tag} already exists"
 
-  if [[ "$(<"${version_path}")" == "${version}" ]]; then
-    die "release version ${version} is already recorded in ${version_file}"
+  if [[ -n "${version_file}" ]]; then
+    version_path="$(repo_root)/${version_file}"
+    [[ -f "${version_path}" ]] || die "release version file not found: ${version_file}"
+
+    if [[ "$(<"${version_path}")" == "${version}" ]]; then
+      version_file_status="unchanged"
+    else
+      printf '%s\n' "${version}" > "${version_path}"
+      git add "${version_file}"
+      version_file_status="updated"
+    fi
   fi
 
-  printf '%s\n' "${version}" > "${version_path}"
-
-  git add "${version_file}"
-  VIBE_ALLOW_COMMIT_BASE=1 git commit -m "chore(release): ${tag}" >/dev/null
+  VIBE_ALLOW_COMMIT_BASE=1 git commit --allow-empty -m "chore(release): ${tag}" >/dev/null
   git tag -a "${tag}" -m "${tag}"
 
   if [[ "${push_after_release}" == "true" ]]; then
@@ -566,7 +578,17 @@ command_release() {
   fi
 
   say "Released ${tag}"
-  say "Version file: ${version_file}"
+  case "${version_file_status}" in
+    updated)
+      say "Updated version file: ${version_file}"
+      ;;
+    unchanged)
+      say "Version file already matched: ${version_file}"
+      ;;
+    *)
+      say "Version file: skipped"
+      ;;
+  esac
 
   if [[ "${push_after_release}" == "true" ]]; then
     say "Pushed: origin/${base} and ${tag}"

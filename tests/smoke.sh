@@ -96,22 +96,35 @@ fi
 
 printf 'smoke: worktree finish ok\n'
 
-printf '0.0.0\n' > "${REPO_DIR}/VERSION"
-git -C "${REPO_DIR}" add VERSION
-VIBE_ALLOW_COMMIT_BASE=1 git -C "${REPO_DIR}" commit -m "chore: add version file" >/dev/null
-
 (
   cd "${REPO_DIR}" >/dev/null
   "${ROOT}/bin/git-vibe" release 0.1.0 --push >/dev/null
 )
 
-[[ "$(<"${REPO_DIR}/VERSION")" == "0.1.0" ]] || fail "release did not update VERSION"
 [[ "$(git -C "${REPO_DIR}" log -1 --pretty=%s)" == "chore(release): v0.1.0" ]] || fail "release did not create the expected commit"
 [[ "$(git -C "${REPO_DIR}" tag --list "v0.1.0")" == "v0.1.0" ]] || fail "release did not create the expected tag"
+[[ ! -f "${REPO_DIR}/VERSION" ]] || fail "release unexpectedly created VERSION"
 git --git-dir="${ORIGIN_DIR}" show-ref --verify --quiet refs/tags/v0.1.0 || fail "release --push did not push the tag"
 [[ "$(git -C "${REPO_DIR}" rev-parse HEAD)" == "$(git --git-dir="${ORIGIN_DIR}" rev-parse refs/heads/main)" ]] || fail "release --push did not push main"
 
 printf 'smoke: release ok\n'
+
+printf '0.1.0\n' > "${REPO_DIR}/VERSION"
+git -C "${REPO_DIR}" add VERSION
+VIBE_ALLOW_COMMIT_BASE=1 git -C "${REPO_DIR}" commit -m "chore: add version file" >/dev/null
+
+(
+  cd "${REPO_DIR}" >/dev/null
+  "${ROOT}/bin/git-vibe" release 0.2.0 --push >/dev/null
+)
+
+[[ "$(<"${REPO_DIR}/VERSION")" == "0.2.0" ]] || fail "release did not update VERSION"
+[[ "$(git -C "${REPO_DIR}" log -1 --pretty=%s)" == "chore(release): v0.2.0" ]] || fail "release did not create the expected commit with VERSION present"
+[[ "$(git -C "${REPO_DIR}" tag --list "v0.2.0")" == "v0.2.0" ]] || fail "release did not create the expected tag with VERSION present"
+git --git-dir="${ORIGIN_DIR}" show-ref --verify --quiet refs/tags/v0.2.0 || fail "release --push did not push the second tag"
+[[ "$(git -C "${REPO_DIR}" rev-parse HEAD)" == "$(git --git-dir="${ORIGIN_DIR}" rev-parse refs/heads/main)" ]] || fail "release --push did not push main after updating VERSION"
+
+printf 'smoke: release with version file ok\n'
 
 mkdir -p "${INSTALL_HOME}"
 
