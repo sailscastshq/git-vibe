@@ -39,6 +39,8 @@ Open a vibe:
 git vibe code <name>
 ```
 
+Editor launch follows `vibe.openEditor=auto|always|never`. The default is `auto`, which opens VS Code only in interactive terminals. Use `--editor` or `--no-editor` to override that for one run.
+
 Open a vibe with the short alias:
 
 ```bash

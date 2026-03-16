@@ -74,6 +74,8 @@ The installer:
 - appends `~/.git-vibe/bin` to your shell profile if it is not already managed by Git Vibe
 - installs shell integration so `git vibe code ...` moves you into the new worktree and `git vibe finish ...` brings you back to the main worktree after cleanup
 
+Editor launch defaults to `auto`, which means Git Vibe opens VS Code only in interactive terminals. You can override that per repo or globally with `vibe.openEditor=auto|always|never`.
+
 If you want the standalone `git-vibe` binary on your shell `PATH`, the installer adds this line to your shell profile:
 
 ```bash
@@ -94,7 +96,7 @@ After your shell profile is loaded, this should also work the way you expect:
 git vibe code fallback-app-urls
 ```
 
-You will land inside the worktree automatically, and if the VS Code `code` CLI is installed Git Vibe will also open that worktree in VS Code. In a VS Code terminal it replaces the current window so Source Control follows the feature worktree instead of staying on the base repo.
+You will land inside the worktree automatically, and in interactive terminals Git Vibe will also open that worktree in VS Code when the `code` CLI is installed. In a VS Code terminal it replaces the current window so Source Control follows the feature worktree instead of staying on the base repo.
 
 If you prefer short aliases, the installer also gives you:
 
@@ -149,7 +151,7 @@ git vibe finish --sync fallback-app-urls
 
 ## Commands
 
-### `git vibe code <name>`
+### `git vibe code [--editor] [--no-editor] <name>`
 
 Creates or reopens a `feat/<slug>` worktree. If the vibe does not exist yet, Git Vibe creates the branch from `main` and opens it. If it already exists, Git Vibe jumps back into that same worktree instead of creating a duplicate.
 
@@ -159,7 +161,13 @@ Example:
 git vibe code add-billing-webhook
 ```
 
-If the VS Code `code` CLI is available, `git vibe code ...` opens that worktree in VS Code too.
+Editor launch follows `vibe.openEditor`, which accepts `auto`, `always`, or `never`.
+
+- `auto` is the default and opens VS Code only in interactive terminals
+- `always` opens VS Code whenever the `code` CLI is available
+- `never` skips editor launch
+
+Use `--editor` or `--no-editor` to override the config for a single run.
 
 ### `git vibe finish [--local] [--sync] [name]`
 
@@ -278,6 +286,13 @@ Useful repo-level override example:
 
 ```bash
 git config vibe.worktreeRoot ../worktrees
+```
+
+Editor launch policy:
+
+```bash
+git config --global vibe.openEditor auto
+git config vibe.openEditor never
 ```
 
 To block raw `main` pushes in a specific repo:
