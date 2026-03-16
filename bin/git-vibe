@@ -274,7 +274,7 @@ normalize_release_version() {
 
 print_help() {
   cat <<'EOF'
-Git Vibe Flow
+Git Vibe
 
 Usage:
   git vibe code <name>

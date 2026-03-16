@@ -117,6 +117,16 @@ mkdir -p "${INSTALL_HOME}"
 
 HOME="${INSTALL_HOME}" SHELL=/bin/bash GIT_VIBE_HOME="${INSTALL_DIR}" bash "${ROOT}/install.sh" >/dev/null
 
+ALIAS_WORKTREE_DIR="${TMP_DIR}/.vibe/demo/alias-shortcut"
+
+(
+  cd "${REPO_DIR}" >/dev/null
+  HOME="${INSTALL_HOME}" git vc alias-shortcut >/dev/null
+)
+[[ -d "${ALIAS_WORKTREE_DIR}" ]] || fail "git vc did not create the expected worktree"
+git -C "${REPO_DIR}" worktree remove "${ALIAS_WORKTREE_DIR}" >/dev/null
+git -C "${REPO_DIR}" branch -d feat/alias-shortcut >/dev/null
+
 git init "${SHELL_REPO_DIR}" >/dev/null
 git -C "${SHELL_REPO_DIR}" config user.name "Git Vibe Smoke"
 git -C "${SHELL_REPO_DIR}" config user.email "smoke@example.com"
@@ -133,7 +143,7 @@ EXPECTED_SHELL_REPO_DIR="$(cd "${SHELL_REPO_DIR}" && pwd -P)"
 AUTO_CD_OUTPUT="$(HOME="${INSTALL_HOME}" SHELL=/bin/bash bash -lc '
   source ~/.bashrc
   cd "'"${SHELL_REPO_DIR}"'"
-  git vibe code shell-jump >/dev/null
+  git vc shell-jump >/dev/null
   pwd -P
 ')"
 

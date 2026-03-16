@@ -1,9 +1,9 @@
 ---
 name: git-vibe
-description: Use this skill when working in a repository that follows Git Vibe Flow, where `main` is the only long-lived branch, all work branches stay under `feat/*`, every `feat/*` branch is created as a worktree, and releases are cut directly from `main` with annotated tags.
+description: Use this skill when working in a repository that follows Git Vibe, where `main` is the only long-lived branch, all work branches stay under `feat/*`, every `feat/*` branch is created as a worktree, and releases are cut directly from `main` with annotated tags.
 ---
 
-# Git Vibe Flow
+# Git Vibe
 
 Use this skill when the user wants to:
 
@@ -24,7 +24,7 @@ Use this skill when the user wants to:
 
 ## Why this workflow exists
 
-Git Vibe Flow is optimized for AI orchestration and parallel work. The point is to make the safe path the easy path:
+Git Vibe is optimized for AI orchestration and parallel work. The point is to make the safe path the easy path:
 
 - no `develop`
 - no `fix/*`, `hotfix/*`, or `release/*`
@@ -37,6 +37,12 @@ Open a vibe:
 
 ```bash
 git vibe code <name>
+```
+
+Open a vibe with the short alias:
+
+```bash
+git vc <name>
 ```
 
 Finish a vibe after a remote merge:
@@ -67,6 +73,12 @@ Cut and push a release directly from `main`:
 
 ```bash
 git vibe release <version> --push
+```
+
+Cut a release with the short alias:
+
+```bash
+git vr <version>
 ```
 
 List active vibes:
@@ -103,7 +115,7 @@ git vibe version
 
 - Keep branch names under `feat/*` only.
 - Continue using semantic commits like `feat:`, `fix:`, `docs:`, `chore:`, and `test:`.
-- Do not introduce `develop`, `fix/*`, `hotfix/*`, or `release/*` unless the user explicitly wants to leave Git Vibe Flow.
+- Do not introduce `develop`, `fix/*`, `hotfix/*`, or `release/*` unless the user explicitly wants to leave Git Vibe.
 
 ## Hook behavior and overrides
 
@@ -118,7 +130,7 @@ VIBE_ALLOW_COMMIT_BASE=1 git commit -m "chore(release): v0.0.1"
 VIBE_ALLOW_PUSH_BASE=1 git push origin main
 ```
 
-If a repo wants Git Vibe Flow to block raw `main` pushes again, set:
+If a repo wants Git Vibe to block raw `main` pushes again, set:
 
 ```bash
 git config vibe.disallowPushOnBase true
@@ -158,6 +170,6 @@ curl -fsSL https://raw.githubusercontent.com/sailscastshq/git-vibe/v0.0.1/instal
 
 The installer does two important things:
 
-- sets a global Git alias so `git vibe ...` works immediately
+- sets global Git aliases so `git vibe ...`, `git vc ...`, and `git vr ...` work immediately
 - appends `~/.git-vibe/bin` to the shell profile so `git-vibe ...` works in future terminals
-- installs shell integration so `git vibe code ...` and `git vibe finish ...` can move between worktrees automatically
+- installs shell integration so `git vibe code ...`, `git vibe finish ...`, and `git vc ...` can move between worktrees automatically

@@ -1,6 +1,6 @@
-# Git Vibe Flow
+# Git Vibe
 
-Git Vibe Flow is a lightweight Git workflow for teams that ship from `main`, keep all work on `feat/*` branches, and treat every `feat/*` branch as a worktree from the moment it is created.
+Git Vibe is a lightweight Git workflow for teams that ship from `main`, keep all work on `feat/*` branches, and treat every `feat/*` branch as a worktree from the moment it is created.
 
 The command surface is intentionally small:
 
@@ -14,9 +14,9 @@ The command surface is intentionally small:
 
 Under the hood, every vibe is a short-lived `feat/*` branch that is created as its own worktree. That gives humans and AI agents isolated lanes to work in without polluting `main`.
 
-## Why Git Vibe Flow
+## Why Git Vibe
 
-Classic `git-flow` assumes a world with long-lived `develop` branches, release branches, and slow integration. Git Vibe Flow keeps the parts that still matter and drops the ceremony:
+Classic `git-flow` assumes a world with long-lived `develop` branches, release branches, and slow integration. Git Vibe keeps the parts that still matter and drops the ceremony:
 
 - `main` is the only long-lived branch.
 - Every work branch starts as `feat/<slug>`, including fixes and urgent patches.
@@ -26,7 +26,7 @@ Classic `git-flow` assumes a world with long-lived `develop` branches, release b
 
 This is a better fit for fast-moving teams and AI-assisted development, where multiple experiments can happen in parallel and isolation matters more than branch hierarchy.
 
-Git Vibe Flow is also built for AI orchestration. When every `feat/*` branch gets its own worktree by default, you can safely run multiple agents, terminals, test runs, and experiments side by side without branch hopping, stash juggling, or cross-task contamination.
+Git Vibe is also built for AI orchestration. When every `feat/*` branch gets its own worktree by default, you can safely run multiple agents, terminals, test runs, and experiments side by side without branch hopping, stash juggling, or cross-task contamination.
 
 ## What the workflow includes
 
@@ -46,7 +46,7 @@ Quick install:
 curl -fsSL https://raw.githubusercontent.com/sailscastshq/git-vibe/main/install.sh | bash
 ```
 
-Install the Git Vibe Flow skill too:
+Install the Git Vibe skill too:
 
 ```bash
 npx skills add sailscastshq/git-vibe
@@ -65,12 +65,13 @@ The installer:
 - copies `git-vibe` into `~/.git-vibe/bin`
 - installs global Git hooks into `~/.git-vibe/hooks`
 - creates a global Git alias so `git vibe` works even before a shell reload
+- creates short Git aliases for `git vc` and `git vr`
 - sets `core.hooksPath` globally
 - seeds these defaults:
   - `vibe.baseBranch=main`
   - `vibe.branchPrefix=feat/`
   - `vibe.worktreeRoot=../.vibe`
-- appends `~/.git-vibe/bin` to your shell profile if it is not already managed by Git Vibe Flow
+- appends `~/.git-vibe/bin` to your shell profile if it is not already managed by Git Vibe
 - installs shell integration so `git vibe code ...` moves you into the new worktree and `git vibe finish ...` brings you back to the main worktree after cleanup
 
 If you want the standalone `git-vibe` binary on your shell `PATH`, the installer adds this line to your shell profile:
@@ -93,7 +94,14 @@ After your shell profile is loaded, this should also work the way you expect:
 git vibe code fallback-app-urls
 ```
 
-You will land inside the worktree automatically, and if the VS Code `code` CLI is installed Git Vibe Flow will also open that worktree in VS Code. In a VS Code terminal it replaces the current window so Source Control follows the feature worktree instead of staying on the base repo.
+You will land inside the worktree automatically, and if the VS Code `code` CLI is installed Git Vibe will also open that worktree in VS Code. In a VS Code terminal it replaces the current window so Source Control follows the feature worktree instead of staying on the base repo.
+
+If you prefer short aliases, the installer also gives you:
+
+```bash
+git vc fallback-app-urls
+git vr 0.0.2 --push
+```
 
 ## Workflow
 
@@ -112,7 +120,7 @@ That creates:
 
 Do all work inside that worktree. Even fixes and urgent patches still live under `feat/*`.
 
-If you rerun `git vibe code fallback-app-urls`, Git Vibe Flow reopens the existing worktree instead of creating a duplicate branch.
+If you rerun `git vibe code fallback-app-urls`, Git Vibe reopens the existing worktree instead of creating a duplicate branch.
 
 When the feature is merged locally:
 
@@ -143,7 +151,7 @@ git vibe finish --sync fallback-app-urls
 
 ### `git vibe code <name>`
 
-Creates or reopens a `feat/<slug>` worktree. If the vibe does not exist yet, Git Vibe Flow creates the branch from `main` and opens it. If it already exists, Git Vibe Flow jumps back into that same worktree instead of creating a duplicate.
+Creates or reopens a `feat/<slug>` worktree. If the vibe does not exist yet, Git Vibe creates the branch from `main` and opens it. If it already exists, Git Vibe jumps back into that same worktree instead of creating a duplicate.
 
 Example:
 
@@ -167,7 +175,7 @@ Run it with no name from inside a feature worktree to finish the current vibe.
 
 ### `git vibe release <version> [--push]`
 
-Cuts a release directly from `main`. Git Vibe Flow updates the plain-text `VERSION` file, creates a `chore(release): vX.Y.Z` commit on `main`, and adds an annotated `vX.Y.Z` tag.
+Cuts a release directly from `main`. Git Vibe updates the plain-text `VERSION` file, creates a `chore(release): vX.Y.Z` commit on `main`, and adds an annotated `vX.Y.Z` tag.
 
 Example:
 
@@ -184,7 +192,7 @@ The command is intentionally narrow:
 - it expects a plain-text version file at `VERSION`
 - it creates the commit and tag locally
 
-If you want Git Vibe Flow to push the release for you, use:
+If you want Git Vibe to push the release for you, use:
 
 ```bash
 git vibe release 0.0.2 --push
@@ -210,11 +218,11 @@ Runs `git worktree prune` to clean stale worktree metadata.
 
 ### `git vibe version`
 
-Prints the installed Git Vibe Flow version.
+Prints the installed Git Vibe version.
 
 ## Hooks
 
-Git Vibe Flow uses global hooks as guardrails, not as the workflow engine.
+Git Vibe uses global hooks as guardrails, not as the workflow engine.
 
 ### `pre-commit`
 
@@ -230,7 +238,7 @@ VIBE_ALLOW_COMMIT_BASE=1 git commit -m "chore(release): v0.0.1"
 
 Requires semantic commit messages.
 
-Git Vibe Flow standardizes branch names, not commit types. Branches always stay under `feat/*`, but commits can still use semantic types like `feat:`, `fix:`, `docs:`, `chore:`, and `test:`.
+Git Vibe standardizes branch names, not commit types. Branches always stay under `feat/*`, but commits can still use semantic types like `feat:`, `fix:`, `docs:`, `chore:`, and `test:`.
 
 Accepted examples:
 
@@ -242,7 +250,7 @@ Accepted examples:
 
 Allows pushes from the base branch by default.
 
-If a repo wants Git Vibe Flow to block raw `main` pushes again, opt into that explicitly:
+If a repo wants Git Vibe to block raw `main` pushes again, opt into that explicitly:
 
 ```bash
 git config vibe.disallowPushOnBase true
@@ -256,7 +264,7 @@ VIBE_ALLOW_PUSH_BASE=1 git push origin main
 
 ## Configuration
 
-Git Vibe Flow reads from Git config so you can keep global defaults and still override per repo.
+Git Vibe reads from Git config so you can keep global defaults and still override per repo.
 
 Global defaults:
 
@@ -288,7 +296,7 @@ git config vibe.releaseVersionFile VERSION
 
 ## Release and tagging
 
-There is no `develop` branch in Git Vibe Flow. Releases are cut directly from `main`.
+There is no `develop` branch in Git Vibe. Releases are cut directly from `main`.
 
 The release flow is:
 
@@ -298,7 +306,7 @@ The release flow is:
 4. run `git vibe release <version>` or `git vibe release <version> --push`
 5. push `main` and the tag
 
-For Git Vibe Flow `0.0.2`, the commands are:
+For Git Vibe `0.0.2`, the commands are:
 
 ```bash
 git switch main
