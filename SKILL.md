@@ -144,7 +144,7 @@ git pull --ff-only origin main
 git vibe release 0.0.2 --push
 ```
 
-The release command updates the plain-text `VERSION` file, creates `chore(release): vX.Y.Z` on `main`, adds the annotated `vX.Y.Z` tag, and can push `main` plus the tag to `origin` when you pass `--push`.
+The release command creates `chore(release): vX.Y.Z` on `main`, adds the annotated `vX.Y.Z` tag, and can push `main` plus the tag to `origin` when you pass `--push`. If the repo already has a top-level `VERSION` file, or you configure `vibe.releaseVersionFile`, Git Vibe updates that plain-text file too.
 
 ## Finish modes
 
