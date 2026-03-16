@@ -20,6 +20,31 @@ download() {
   curl -fsSL "${RAW_BASE}/${remote_path}" -o "${target}"
 }
 
+shell_integration_block() {
+  cat <<EOF
+${PATH_MARKER_BEGIN}
+${PATH_LINE}
+
+git() {
+  if [ "\$1" = "vibe" ] && { [ "\$2" = "code" ] || [ "\$2" = "start" ] || [ "\$2" = "finish" ]; }; then
+    __git_vibe_output="\$(command git "\$@" --shell-output 2>&1)"
+    __git_vibe_status=\$?
+    __git_vibe_path="\$(printf '%s\n' "\$__git_vibe_output" | sed -n 's/^__GIT_VIBE_CHDIR__=//p' | tail -n 1)"
+    printf '%s\n' "\$__git_vibe_output" | sed '/^__GIT_VIBE_CHDIR__=/d'
+
+    if [ "\$__git_vibe_status" -eq 0 ] && [ -n "\$__git_vibe_path" ]; then
+      builtin cd "\$__git_vibe_path" || return "\$__git_vibe_status"
+    fi
+
+    return "\$__git_vibe_status"
+  fi
+
+  command git "\$@"
+}
+${PATH_MARKER_END}
+EOF
+}
+
 detect_profile() {
   local shell_name
   shell_name="$(basename "${SHELL:-}")"
@@ -41,21 +66,21 @@ detect_profile() {
   esac
 }
 
-ensure_path_in_profile() {
-  local profile
+ensure_shell_integration() {
+  local profile temp
   profile="$(detect_profile)"
   touch "${profile}"
+  temp="$(mktemp)"
 
-  if grep -Fq "${PATH_MARKER_BEGIN}" "${profile}"; then
-    printf '%s\n' "${profile}"
-    return 0
-  fi
+  awk -v begin="${PATH_MARKER_BEGIN}" -v end="${PATH_MARKER_END}" '
+    $0 == begin { skipping = 1; next }
+    $0 == end { skipping = 0; next }
+    !skipping { print }
+  ' "${profile}" > "${temp}"
 
-  {
-    printf '\n%s\n' "${PATH_MARKER_BEGIN}"
-    printf '%s\n' "${PATH_LINE}"
-    printf '%s\n' "${PATH_MARKER_END}"
-  } >> "${profile}"
+  printf '\n' >> "${temp}"
+  shell_integration_block >> "${temp}"
+  mv "${temp}" "${profile}"
 
   printf '%s\n' "${profile}"
 }
@@ -86,7 +111,7 @@ git config --global vibe.branchPrefix feat/
 git config --global vibe.worktreeRoot ../.vibe
 git config --global alias.vibe "!${BIN_DIR}/git-vibe"
 
-PROFILE_FILE="$(ensure_path_in_profile)"
+PROFILE_FILE="$(ensure_shell_integration)"
 
 cat <<EOF
 Git Vibe Flow $(<"${INSTALL_DIR}/VERSION") installed to ${INSTALL_DIR}
@@ -106,9 +131,10 @@ Shell profile updated:
   ${PROFILE_FILE}
 
 Current terminal note:
-  The installer cannot change the PATH of the shell that launched it.
+  The installer cannot change the current shell session that launched it.
   Open a new terminal, run: source "${PROFILE_FILE}", or run:
   ${PATH_LINE}
+  After the profile is loaded, git vibe code/finish will auto-jump between worktrees.
 
 After reloading your shell, run:
   git vibe version

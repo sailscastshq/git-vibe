@@ -19,6 +19,10 @@ say() {
   printf '%s\n' "$*"
 }
 
+say_shell_chdir() {
+  printf '__GIT_VIBE_CHDIR__=%s\n' "$1"
+}
+
 require_repo() {
   git rev-parse --show-toplevel >/dev/null 2>&1 || die "run this command inside a Git repository"
 }
@@ -226,7 +230,7 @@ print_help() {
 Git Vibe Flow
 
 Usage:
-  git vibe start <name>
+  git vibe code <name>
   git vibe finish [--local] [--sync] [name]
   git vibe list
   git vibe status
@@ -236,73 +240,159 @@ Usage:
   git vibe hook <pre-commit|commit-msg|pre-push> [args...]
 
 Examples:
-  git vibe start fallback-app-urls
+  git vibe code fallback-app-urls
   git vibe finish --sync fallback-app-urls
   git vibe finish --local fallback-app-urls
 EOF
 }
 
-command_start() {
-  local name slug branch base path
-  require_repo
+open_editor_for_path() {
+  local path
+  path="$1"
 
-  [[ $# -gt 0 ]] || die "start requires a feature name"
-
-  name="$*"
-  slug="$(slug_from_name "${name}")"
-  branch="$(branch_from_slug "${slug}")"
-  base="$(base_branch)"
-  path="$(worktree_path_for_slug "${slug}")"
-
-  [[ "$(current_branch)" == "${base}" ]] || die "start from ${base}, not $(current_branch)"
-  ensure_clean_tree "$(repo_root)"
-  branch_exists "${base}" || die "base branch ${base} does not exist locally"
-
-  if branch_exists "${branch}" || remote_branch_exists "origin/${branch}"; then
-    die "branch ${branch} already exists"
+  if ! command -v code >/dev/null 2>&1; then
+    say "Editor: skipped (VS Code CLI 'code' not found)"
+    return 0
   fi
 
-  if [[ -e "${path}" ]]; then
-    die "worktree path already exists: ${path}"
+  if [[ "${TERM_PROGRAM:-}" == "vscode" ]]; then
+    code -r "${path}" >/dev/null 2>&1 || code "${path}" >/dev/null 2>&1 || true
+    say "Editor: opened in VS Code"
+    return 0
   fi
 
-  mkdir -p "$(vibe_root)"
-  git worktree add -b "${branch}" "${path}" "${base}"
-
-  say "Started ${branch}"
-  say "Path: ${path}"
+  code "${path}" >/dev/null 2>&1 || true
+  say "Editor: opened in VS Code"
 }
 
-command_finish() {
-  local name branch slug path mode sync base merged_into
+command_code() {
+  local name slug branch base path shell_output open_editor action base_path
+  local -a name_parts
   require_repo
 
-  mode="auto"
-  sync="false"
-  name=""
+  shell_output="false"
+  open_editor="true"
+  name_parts=()
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --local)
-        mode="local"
-        shift
+      --shell-output)
+        shell_output="true"
         ;;
-      --sync)
-        sync="true"
-        shift
+      --no-editor)
+        open_editor="false"
         ;;
       -h|--help)
         print_help
         exit 0
         ;;
       *)
-        name="$1"
-        shift
+        name_parts+=("$1")
         ;;
     esac
+    shift
+  done
+
+  [[ ${#name_parts[@]} -gt 0 ]] || die "code requires a feature name"
+
+  name="${name_parts[*]}"
+  slug="$(slug_from_name "${name}")"
+  branch="$(branch_from_slug "${slug}")"
+  base="$(base_branch)"
+  path="$(worktree_path_for_slug "${slug}")"
+  action="Opened"
+
+  if find_worktree_for_branch "${branch}" >/dev/null 2>&1; then
+    path="$(find_worktree_for_branch "${branch}")"
+  elif branch_exists "${branch}"; then
+    if [[ -e "${path}" ]]; then
+      die "worktree path already exists: ${path}"
+    fi
+    mkdir -p "$(vibe_root)"
+    git worktree add "${path}" "${branch}"
+    action="Attached"
+  elif remote_branch_exists "origin/${branch}"; then
+    if [[ -e "${path}" ]]; then
+      die "worktree path already exists: ${path}"
+    fi
+    mkdir -p "$(vibe_root)"
+    git worktree add -b "${branch}" "${path}" "origin/${branch}"
+    git -C "${path}" branch --set-upstream-to "origin/${branch}" "${branch}" >/dev/null 2>&1 || true
+    action="Checked out"
+  else
+    branch_exists "${base}" || die "base branch ${base} does not exist locally"
+    base_path="$(base_worktree_path || true)"
+
+    if [[ -n "${base_path}" ]]; then
+      ensure_clean_tree "${base_path}"
+      git -C "${base_path}" switch "${base}" >/dev/null 2>&1 || true
+    fi
+
+    if [[ -e "${path}" ]]; then
+      die "worktree path already exists: ${path}"
+    fi
+
+    mkdir -p "$(vibe_root)"
+    git worktree add -b "${branch}" "${path}" "${base}"
+    action="Started"
+  fi
+
+  say "${action} ${branch}"
+  say "Path: ${path}"
+
+  if [[ "${open_editor}" == "true" ]]; then
+    open_editor_for_path "${path}"
+  fi
+
+  if [[ "${shell_output}" == "true" ]]; then
+    say_shell_chdir "${path}"
+  fi
+}
+
+command_start() {
+  command_code --no-editor "$@"
+}
+
+command_finish() {
+  local name branch slug path mode sync base merged_into shell_output base_path
+  local -a name_parts
+  require_repo
+
+  mode="auto"
+  sync="false"
+  shell_output="false"
+  name=""
+  name_parts=()
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --local)
+        mode="local"
+        ;;
+      --sync)
+        sync="true"
+        ;;
+      --shell-output)
+        shell_output="true"
+        ;;
+      -h|--help)
+        print_help
+        exit 0
+        ;;
+      *)
+        name_parts+=("$1")
+        ;;
+    esac
+    shift
   done
 
   base="$(base_branch)"
+  base_path="$(base_worktree_path || true)"
+  [[ -n "${base_path}" ]] || base_path="$(repo_root)"
+
+  if [[ ${#name_parts[@]} -gt 0 ]]; then
+    name="${name_parts[*]}"
+  fi
 
   if [[ -z "${name}" ]]; then
     branch="$(current_branch)"
@@ -333,9 +423,10 @@ command_finish() {
     merged_into="${base}"
   elif remote_branch_exists "origin/${base}" && is_ancestor_of "${branch}" "origin/${base}"; then
     sync_base_branch
+    base_path="$(base_worktree_path || true)"
+    [[ -n "${base_path}" ]] || base_path="$(repo_root)"
     merged_into="origin/${base}"
   elif [[ "${mode}" == "local" ]]; then
-    local base_path
     base_path="$(base_worktree_path || true)"
     [[ -n "${base_path}" ]] || die "could not find a worktree for ${base}"
     ensure_clean_tree "${base_path}"
@@ -355,6 +446,10 @@ command_finish() {
 
   say "Finished ${branch}"
   say "Merged into: ${merged_into}"
+
+  if [[ "${shell_output}" == "true" ]]; then
+    say_shell_chdir "${base_path}"
+  fi
 }
 
 command_list() {
@@ -437,7 +532,7 @@ hook_pre_commit() {
   allow="$(git config --bool --get vibe.allowCommitOnBase 2>/dev/null || true)"
 
   if [[ "${current}" == "${base}" && "${VIBE_ALLOW_COMMIT_BASE:-0}" != "1" && "${allow}" != "true" ]]; then
-    die "commits on ${base} are blocked; start a vibe with: git vibe start <name>"
+    die "commits on ${base} are blocked; open a vibe with: git vibe code <name>"
   fi
 }
 
@@ -492,6 +587,10 @@ main() {
   case "${command}" in
     help|-h|--help)
       print_help
+      ;;
+    code)
+      shift
+      command_code "$@"
       ;;
     start)
       shift

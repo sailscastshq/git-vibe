@@ -7,7 +7,7 @@ description: Use this skill when working in a repository that follows Git Vibe F
 
 Use this skill when the user wants to:
 
-- start or finish work with `git vibe`
+- open or finish work with `git vibe`
 - apply a `main` plus `feat/*` workflow
 - isolate tasks with worktrees
 - coordinate parallel human and AI work safely
@@ -33,10 +33,10 @@ Git Vibe Flow is optimized for AI orchestration and parallel work. The point is 
 
 ## Commands
 
-Start a vibe:
+Open a vibe:
 
 ```bash
-git vibe start <name>
+git vibe code <name>
 ```
 
 Finish a vibe after a remote merge:
@@ -132,3 +132,4 @@ The installer does two important things:
 
 - sets a global Git alias so `git vibe ...` works immediately
 - appends `~/.git-vibe/bin` to the shell profile so `git-vibe ...` works in future terminals
+- installs shell integration so `git vibe code ...` and `git vibe finish ...` can move between worktrees automatically
