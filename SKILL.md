@@ -63,6 +63,12 @@ Cut a release directly from `main`:
 git vibe release <version>
 ```
 
+Cut and push a release directly from `main`:
+
+```bash
+git vibe release <version> --push
+```
+
 List active vibes:
 
 ```bash
@@ -102,14 +108,20 @@ git vibe version
 ## Hook behavior and overrides
 
 - Direct commits on `main` are blocked by default.
-- Direct pushes on `main` are blocked by default.
+- Direct pushes on `main` are allowed by default.
 - Semantic commit messages are enforced by the global hooks.
 
-Use these overrides only for deliberate maintainer actions such as release commits:
+Use these overrides only for deliberate maintainer actions such as release commits or for repos that explicitly block raw `main` pushes:
 
 ```bash
 VIBE_ALLOW_COMMIT_BASE=1 git commit -m "chore(release): v0.0.1"
 VIBE_ALLOW_PUSH_BASE=1 git push origin main
+```
+
+If a repo wants Git Vibe Flow to block raw `main` pushes again, set:
+
+```bash
+git config vibe.disallowPushOnBase true
 ```
 
 ## Release flow
@@ -117,11 +129,10 @@ VIBE_ALLOW_PUSH_BASE=1 git push origin main
 ```bash
 git switch main
 git pull --ff-only origin main
-git vibe release 0.0.2
-VIBE_ALLOW_PUSH_BASE=1 git push origin main --tags
+git vibe release 0.0.2 --push
 ```
 
-The release command updates the plain-text `VERSION` file, creates `chore(release): vX.Y.Z` on `main`, and adds the annotated `vX.Y.Z` tag.
+The release command updates the plain-text `VERSION` file, creates `chore(release): vX.Y.Z` on `main`, adds the annotated `vX.Y.Z` tag, and can push `main` plus the tag to `origin` when you pass `--push`.
 
 ## Finish modes
 
