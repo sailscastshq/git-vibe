@@ -3,7 +3,7 @@ name: git-vibe
 description: Use this skill when working in a repository that follows Git Vibe Flow, where `main` is the only long-lived branch, all work branches stay under `feat/*`, every `feat/*` branch is created as a worktree, and releases are cut directly from `main` with annotated tags.
 ---
 
-# Git Vibe Flow
+# Git Vibe
 
 Use this skill when the user wants to:
 
