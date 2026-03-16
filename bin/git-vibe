@@ -437,12 +437,18 @@ command_finish() {
 
   [[ -n "${merged_into}" ]] || die "branch ${branch} is not merged into ${base}; merge it first or use --local"
 
-  if [[ -d "${path}" ]]; then
-    git worktree remove "${path}"
-  fi
+  [[ -n "${base_path}" ]] || die "could not find a stable worktree for ${base}"
 
-  git branch -d "${branch}" >/dev/null
-  git worktree prune >/dev/null 2>&1 || true
+  (
+    cd "${base_path}" >/dev/null 2>&1 || die "could not enter ${base_path}"
+
+    if [[ -d "${path}" ]]; then
+      git worktree remove "${path}"
+    fi
+
+    git branch -d "${branch}" >/dev/null
+    git worktree prune >/dev/null 2>&1 || true
+  )
 
   say "Finished ${branch}"
   say "Merged into: ${merged_into}"
