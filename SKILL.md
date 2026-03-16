@@ -1,5 +1,5 @@
 ---
-name: git-vibe-flow
+name: git-vibe
 description: Use this skill when working in a repository that follows Git Vibe Flow, where `main` is the only long-lived branch, all work branches stay under `feat/*`, every `feat/*` branch is created as a worktree, and releases are cut directly from `main` with annotated tags.
 ---
 
@@ -11,6 +11,7 @@ Use this skill when the user wants to:
 - apply a `main` plus `feat/*` workflow
 - isolate tasks with worktrees
 - coordinate parallel human and AI work safely
+- inspect active vibes or worktree paths
 - cut a release directly from `main`
 
 ## Core rules
@@ -56,11 +57,48 @@ List active vibes:
 git vibe list
 ```
 
+Show vibe status:
+
+```bash
+git vibe status
+```
+
+Show the path for a vibe:
+
+```bash
+git vibe path <name>
+```
+
+Prune stale worktree metadata:
+
+```bash
+git vibe prune
+```
+
+Check the installed version:
+
+```bash
+git vibe version
+```
+
 ## Branch and commit guidance
 
 - Keep branch names under `feat/*` only.
 - Continue using semantic commits like `feat:`, `fix:`, `docs:`, `chore:`, and `test:`.
 - Do not introduce `develop`, `fix/*`, `hotfix/*`, or `release/*` unless the user explicitly wants to leave Git Vibe Flow.
+
+## Hook behavior and overrides
+
+- Direct commits on `main` are blocked by default.
+- Direct pushes on `main` are blocked by default.
+- Semantic commit messages are enforced by the global hooks.
+
+Use these overrides only for deliberate maintainer actions such as release commits:
+
+```bash
+VIBE_ALLOW_COMMIT_BASE=1 git commit -m "chore(release): v0.0.1"
+VIBE_ALLOW_PUSH_BASE=1 git push origin main
+```
 
 ## Release flow
 
@@ -89,3 +127,8 @@ Pin a release:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/sailscastshq/git-vibe/v0.0.1/install.sh | GIT_VIBE_REF=v0.0.1 bash
 ```
+
+The installer does two important things:
+
+- sets a global Git alias so `git vibe ...` works immediately
+- appends `~/.git-vibe/bin` to the shell profile so `git-vibe ...` works in future terminals
