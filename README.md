@@ -6,6 +6,7 @@ The command surface is intentionally small:
 
 - `git vibe code <name>`
 - `git vibe finish <name>`
+- `git vibe release <version>`
 - `git vibe list`
 - `git vibe status`
 - `git vibe prune`
@@ -26,10 +27,10 @@ This is a better fit for fast-moving teams and AI-assisted development, where mu
 
 Git Vibe Flow is also built for AI orchestration. When every `feat/*` branch gets its own worktree by default, you can safely run multiple agents, terminals, test runs, and experiments side by side without branch hopping, stash juggling, or cross-task contamination.
 
-## What v0.0.1 includes
+## What the workflow includes
 
 - A portable `git-vibe` executable exposed as `git vibe ...`
-- `start`, `finish`, `list`, `status`, `path`, `prune`, and `version` commands
+- `code`, `finish`, `release`, `list`, `status`, `path`, `prune`, and `version` commands
 - Global hook wrappers for `pre-commit`, `commit-msg`, and `pre-push`
 - Semantic commit enforcement
 - Base-branch protection against direct commits and pushes
@@ -155,6 +156,31 @@ Finishes a vibe safely.
 
 Run it with no name from inside a feature worktree to finish the current vibe.
 
+### `git vibe release <version>`
+
+Cuts a release directly from `main`. Git Vibe Flow updates the plain-text `VERSION` file, creates a `chore(release): vX.Y.Z` commit on `main`, and adds an annotated `vX.Y.Z` tag.
+
+Example:
+
+```bash
+git switch main
+git pull --ff-only origin main
+git vibe release 0.0.2
+```
+
+The command is intentionally narrow:
+
+- it must be run from `main`
+- the working tree must be clean
+- it expects a plain-text version file at `VERSION`
+- it creates the commit and tag locally
+
+After that, push the release explicitly:
+
+```bash
+VIBE_ALLOW_PUSH_BASE=1 git push origin main --tags
+```
+
 ### `git vibe list`
 
 Lists active feature worktrees for the current repository.
@@ -229,6 +255,14 @@ Useful repo-level override example:
 git config vibe.worktreeRoot ../worktrees
 ```
 
+Release command example:
+
+```bash
+git config vibe.releaseVersionFile VERSION
+```
+
+`git vibe release` expects that file to be a plain-text file containing only the version string.
+
 ## Release and tagging
 
 There is no `develop` branch in Git Vibe Flow. Releases are cut directly from `main`.
@@ -238,24 +272,19 @@ The release flow is:
 1. make sure every feature for the release is already merged into `main`
 2. switch to `main`
 3. fast-forward to the remote
-4. bump the version
-5. create a release commit on `main`
-6. create an annotated tag
-7. push `main` and the tag
+4. run `git vibe release <version>`
+5. push `main` and the tag
 
-For Git Vibe Flow `0.0.1`, the commands are:
+For Git Vibe Flow `0.0.2`, the commands are:
 
 ```bash
 git switch main
 git pull --ff-only origin main
-printf '0.0.1\n' > VERSION
-git add VERSION
-VIBE_ALLOW_COMMIT_BASE=1 git commit -m "chore(release): v0.0.1"
-git tag -a v0.0.1 -m "v0.0.1"
+git vibe release 0.0.2
 VIBE_ALLOW_PUSH_BASE=1 git push origin main --tags
 ```
 
-The key point is simple: without `develop`, the tag is created on the release commit that lives on `main`.
+Under the hood, `git vibe release 0.0.2` writes `0.0.2` to `VERSION`, commits `chore(release): v0.0.2`, and creates the annotated tag `v0.0.2` on `main`.
 
 ## Development
 

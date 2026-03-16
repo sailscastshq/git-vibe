@@ -80,6 +80,21 @@ fi
 
 printf 'smoke: worktree finish ok\n'
 
+printf '0.0.0\n' > "${REPO_DIR}/VERSION"
+git -C "${REPO_DIR}" add VERSION
+VIBE_ALLOW_COMMIT_BASE=1 git -C "${REPO_DIR}" commit -m "chore: add version file" >/dev/null
+
+(
+  cd "${REPO_DIR}" >/dev/null
+  "${ROOT}/bin/git-vibe" release 0.1.0 >/dev/null
+)
+
+[[ "$(<"${REPO_DIR}/VERSION")" == "0.1.0" ]] || fail "release did not update VERSION"
+[[ "$(git -C "${REPO_DIR}" log -1 --pretty=%s)" == "chore(release): v0.1.0" ]] || fail "release did not create the expected commit"
+[[ "$(git -C "${REPO_DIR}" tag --list "v0.1.0")" == "v0.1.0" ]] || fail "release did not create the expected tag"
+
+printf 'smoke: release ok\n'
+
 mkdir -p "${INSTALL_HOME}"
 
 HOME="${INSTALL_HOME}" SHELL=/bin/bash GIT_VIBE_HOME="${INSTALL_DIR}" bash "${ROOT}/install.sh" >/dev/null

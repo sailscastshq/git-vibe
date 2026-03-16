@@ -51,6 +51,12 @@ Finish a vibe with a local fast-forward merge:
 git vibe finish --local <name>
 ```
 
+Cut a release directly from `main`:
+
+```bash
+git vibe release <version>
+```
+
 List active vibes:
 
 ```bash
@@ -105,14 +111,11 @@ VIBE_ALLOW_PUSH_BASE=1 git push origin main
 ```bash
 git switch main
 git pull --ff-only origin main
-printf '0.0.1\n' > VERSION
-git add VERSION
-VIBE_ALLOW_COMMIT_BASE=1 git commit -m "chore(release): v0.0.1"
-git tag -a v0.0.1 -m "v0.0.1"
+git vibe release 0.0.2
 VIBE_ALLOW_PUSH_BASE=1 git push origin main --tags
 ```
 
-The tag always points at the release commit on `main`.
+The release command updates the plain-text `VERSION` file, creates `chore(release): vX.Y.Z` on `main`, and adds the annotated `vX.Y.Z` tag.
 
 ## Install
 
