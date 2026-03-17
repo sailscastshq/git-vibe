@@ -63,6 +63,12 @@ workspace_app_setting() {
   printf '%s\n' "${configured:-auto}"
 }
 
+issue_branch_style() {
+  local configured
+  configured="$(git_config_get vibe.issueBranchStyle)"
+  printf '%s\n' "${configured:-number-and-title}"
+}
+
 validate_open_editor_mode() {
   case "$1" in
     auto|always|never)
@@ -97,6 +103,16 @@ validate_workspace_app() {
       ;;
     *)
       die "invalid vibe.openWorkspaceWith: $1 (expected auto, codex, or vscode)"
+      ;;
+  esac
+}
+
+validate_issue_branch_style() {
+  case "$1" in
+    number-and-title|number-only|title-only)
+      ;;
+    *)
+      die "invalid vibe.issueBranchStyle: $1 (expected number-and-title, number-only, or title-only)"
       ;;
   esac
 }
@@ -192,6 +208,87 @@ slug_from_name() {
   printf '%s\n' "${slug}"
 }
 
+is_issue_number_ref() {
+  [[ $# -eq 1 && "$1" =~ ^[0-9]+$ ]]
+}
+
+issue_branch_key() {
+  printf 'vibe.issue.%s.branch\n' "$1"
+}
+
+issue_title_key() {
+  printf 'vibe.issue.%s.title\n' "$1"
+}
+
+issue_url_key() {
+  printf 'vibe.issue.%s.url\n' "$1"
+}
+
+issue_branch_mapping() {
+  git_config_get "$(issue_branch_key "$1")"
+}
+
+issue_title_mapping() {
+  git_config_get "$(issue_title_key "$1")"
+}
+
+issue_url_mapping() {
+  git_config_get "$(issue_url_key "$1")"
+}
+
+remember_issue_branch() {
+  local number branch title url
+  number="$1"
+  branch="$2"
+  title="$3"
+  url="$4"
+
+  git config "$(issue_branch_key "${number}")" "${branch}"
+  git config "$(issue_title_key "${number}")" "${title}"
+  git config "$(issue_url_key "${number}")" "${url}"
+}
+
+require_gh() {
+  command -v gh >/dev/null 2>&1 || die "GitHub CLI 'gh' not found; install it to use issue-driven vibes"
+}
+
+fetch_issue_metadata() {
+  local number
+  number="$1"
+  require_gh
+
+  gh issue view "${number}" --json number,title,url --jq '[.number, .title, .url] | @tsv' \
+    || die "could not read GitHub issue #${number}; check gh auth and repo issue access"
+}
+
+issue_slug_from_title() {
+  local title_slug
+  title_slug="$(slugify "$1")"
+  [[ -n "${title_slug}" ]] || die "issue title produced an empty slug"
+  printf '%s\n' "${title_slug}"
+}
+
+slug_from_issue() {
+  local number title style title_slug
+  number="$1"
+  title="$2"
+  style="$(issue_branch_style)"
+  validate_issue_branch_style "${style}"
+  title_slug="$(issue_slug_from_title "${title}")"
+
+  case "${style}" in
+    number-and-title)
+      printf '%s-%s\n' "${number}" "${title_slug}"
+      ;;
+    number-only)
+      printf '%s\n' "${number}"
+      ;;
+    title-only)
+      printf '%s\n' "${title_slug}"
+      ;;
+  esac
+}
+
 branch_from_slug() {
   printf '%s%s\n' "$(branch_prefix)" "$1"
 }
@@ -205,6 +302,62 @@ slug_from_branch() {
 
 worktree_path_for_slug() {
   printf '%s/%s\n' "$(vibe_root)" "$1"
+}
+
+branch_matches_issue_number() {
+  local number branch slug prefix
+  number="$1"
+  branch="$2"
+  prefix="$(branch_prefix)"
+  slug="${branch#${prefix}}"
+  [[ "${branch}" == "${prefix}"* ]] || return 1
+  [[ "${slug}" == "${number}" || "${slug}" == "${number}"-* ]]
+}
+
+find_issue_branch() {
+  local number mapped branch
+  local -a matches
+  number="$1"
+  mapped="$(issue_branch_mapping "${number}")"
+
+  if [[ -n "${mapped}" ]] && { branch_exists "${mapped}" || remote_branch_exists "origin/${mapped}"; }; then
+    printf '%s\n' "${mapped}"
+    return 0
+  fi
+
+  matches=()
+  while IFS= read -r branch; do
+    branch_matches_issue_number "${number}" "${branch}" || continue
+    matches+=("${branch}")
+  done < <(git for-each-ref --format='%(refname:short)' refs/heads refs/remotes/origin | sed 's#^origin/##' | sort -u)
+
+  if [[ ${#matches[@]} -gt 1 ]]; then
+    die "multiple vibe branches match issue #${number}: ${matches[*]}"
+  fi
+
+  if [[ ${#matches[@]} -eq 1 ]]; then
+    printf '%s\n' "${matches[0]}"
+    return 0
+  fi
+
+  return 1
+}
+
+issue_number_for_branch() {
+  local line key number_branch branch number
+  branch="$1"
+
+  while IFS= read -r line; do
+    key="${line%% *}"
+    number_branch="${line#* }"
+    [[ "${number_branch}" == "${branch}" ]] || continue
+    number="${key#vibe.issue.}"
+    number="${number%.branch}"
+    printf '%s\n' "${number}"
+    return 0
+  done < <(git config --get-regexp '^vibe\.issue\.[0-9]+\.branch$' 2>/dev/null || true)
+
+  return 1
 }
 
 ensure_clean_tree() {
@@ -314,6 +467,14 @@ is_vibe_branch() {
 resolve_vibe_branch() {
   local branch slug
 
+  if is_issue_number_ref "$@"; then
+    branch="$(find_issue_branch "$1" || true)"
+    if [[ -n "${branch}" ]]; then
+      printf '%s\n' "${branch}"
+      return 0
+    fi
+  fi
+
   if [[ $# -gt 0 ]]; then
     slug="$(slug_from_name "$*")"
     branch="$(branch_from_slug "${slug}")"
@@ -372,7 +533,7 @@ vibe_untracked_files() {
 }
 
 print_vibe_context() {
-  local branch path base merge_base diff_summary dirty_count behind ahead untracked_count
+  local branch path base merge_base diff_summary dirty_count behind ahead untracked_count issue_number issue_title issue_url
   branch="$1"
   path="$2"
   base="$(base_branch)"
@@ -388,6 +549,20 @@ print_vibe_context() {
   say "  Path: ${path}"
   say "  Compare: ${base}...${branch}"
   say "  Ahead/behind vs ${base}: +${ahead}/-${behind}"
+
+  issue_number="$(issue_number_for_branch "${branch}" || true)"
+  if [[ -n "${issue_number}" ]]; then
+    issue_title="$(issue_title_mapping "${issue_number}")"
+    issue_url="$(issue_url_mapping "${issue_number}")"
+    if [[ -n "${issue_title}" ]]; then
+      say "  Issue: #${issue_number} ${issue_title}"
+    else
+      say "  Issue: #${issue_number}"
+    fi
+    if [[ -n "${issue_url}" ]]; then
+      say "  Issue URL: ${issue_url}"
+    fi
+  fi
 
   if [[ "${dirty_count}" == "0" ]]; then
     say "  Working tree: clean"
@@ -468,6 +643,7 @@ Git Vibe
 
 Usage:
   git vibe code [--editor|--no-editor] [--codex|--vscode] <name>
+  git vibe issue [--editor|--no-editor] [--codex|--vscode] <number>
   git vibe enter [name]
   git vibe open [--codex|--vscode] [name]
   git vibe diff [name]
@@ -484,6 +660,8 @@ Usage:
 
 Examples:
   git vibe code fallback-app-urls
+  git vibe code 9
+  git vibe issue 9
   git vibe code --codex fallback-app-urls
   git vibe code --no-editor fallback-app-urls
   git vibe enter fallback-app-urls
@@ -532,6 +710,7 @@ open_workspace_for_path() {
 
 command_code() {
   local name slug branch base path shell_output open_editor action base_path editor_mode workspace_app workspace_app_override
+  local issue_number issue_title issue_url issue_metadata
   local -a name_parts
   require_repo
 
@@ -571,8 +750,29 @@ command_code() {
   [[ ${#name_parts[@]} -gt 0 ]] || die "code requires a feature name"
 
   name="${name_parts[*]}"
-  slug="$(slug_from_name "${name}")"
-  branch="$(branch_from_slug "${slug}")"
+  issue_number=""
+  issue_title=""
+  issue_url=""
+
+  if is_issue_number_ref "${name_parts[@]}"; then
+    issue_number="${name_parts[0]}"
+    branch="$(find_issue_branch "${issue_number}" || true)"
+
+    if [[ -n "${branch}" ]]; then
+      slug="$(slug_from_branch "${branch}")"
+      issue_title="$(issue_title_mapping "${issue_number}")"
+      issue_url="$(issue_url_mapping "${issue_number}")"
+    else
+      issue_metadata="$(fetch_issue_metadata "${issue_number}")"
+      IFS=$'\t' read -r issue_number issue_title issue_url <<< "${issue_metadata}"
+      slug="$(slug_from_issue "${issue_number}" "${issue_title}")"
+      branch="$(branch_from_slug "${slug}")"
+    fi
+  else
+    slug="$(slug_from_name "${name}")"
+    branch="$(branch_from_slug "${slug}")"
+  fi
+
   base="$(base_branch)"
   path="$(worktree_path_for_slug "${slug}")"
   action="Opened"
@@ -612,6 +812,10 @@ command_code() {
     action="Started"
   fi
 
+  if [[ -n "${issue_number}" ]]; then
+    remember_issue_branch "${issue_number}" "${branch}" "${issue_title}" "${issue_url}"
+  fi
+
   say "${action} ${branch}"
   say "Path: ${path}"
   print_vibe_context "${branch}" "${path}"
@@ -647,6 +851,33 @@ command_code() {
 
 command_start() {
   command_code --no-editor "$@"
+}
+
+command_issue() {
+  local -a passthrough name_parts
+  passthrough=("$@")
+  name_parts=()
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --shell-output|--editor|--no-editor|--codex|--vscode)
+        ;;
+      -h|--help)
+        print_help
+        exit 0
+        ;;
+      *)
+        name_parts+=("$1")
+        ;;
+    esac
+    shift
+  done
+
+  if ! is_issue_number_ref "${name_parts[@]}"; then
+    die "issue requires a GitHub issue number"
+  fi
+
+  command_code "${passthrough[@]}"
 }
 
 command_enter() {
@@ -790,8 +1021,8 @@ command_finish() {
     fi
     slug="$(slug_from_branch "${branch}")"
   else
-    slug="$(slug_from_name "${name}")"
-    branch="$(branch_from_slug "${slug}")"
+    branch="$(resolve_vibe_branch "${name_parts[@]}")"
+    slug="$(slug_from_branch "${branch}")"
   fi
 
   branch_exists "${branch}" || die "branch ${branch} does not exist locally"
@@ -945,7 +1176,7 @@ command_list() {
 }
 
 command_status() {
-  local base current prefix root editor_mode workspace_app branch path
+  local base current prefix root editor_mode workspace_app issue_style branch path
   local -a name_parts
   require_repo
 
@@ -969,8 +1200,10 @@ command_status() {
   root="$(vibe_root)"
   editor_mode="$(open_editor_mode)"
   workspace_app="$(workspace_app_setting)"
+  issue_style="$(issue_branch_style)"
   validate_open_editor_mode "${editor_mode}"
   validate_workspace_app "${workspace_app}"
+  validate_issue_branch_style "${issue_style}"
 
   say "Repo: $(repo_root)"
   say "Base branch: ${base}"
@@ -979,6 +1212,7 @@ command_status() {
   say "Vibe root: ${root}"
   say "Open editor: ${editor_mode}"
   say "Open workspace with: ${workspace_app}"
+  say "Issue branch style: ${issue_style}"
   say ""
 
   if [[ ${#name_parts[@]} -gt 0 ]]; then
@@ -1006,8 +1240,18 @@ command_path() {
 
   [[ $# -gt 0 ]] || die "path requires a vibe name"
 
-  slug="$(slug_from_name "$*")"
-  branch="$(branch_from_slug "${slug}")"
+  branch=""
+  if is_issue_number_ref "$@"; then
+    branch="$(find_issue_branch "$1" || true)"
+  fi
+
+  if [[ -z "${branch}" ]]; then
+    slug="$(slug_from_name "$*")"
+    branch="$(branch_from_slug "${slug}")"
+  else
+    slug="$(slug_from_branch "${branch}")"
+  fi
+
   path="$(find_worktree_for_branch "${branch}" || true)"
   printf '%s\n' "${path:-$(worktree_path_for_slug "${slug}")}"
 }
@@ -1111,6 +1355,10 @@ main() {
     code)
       shift
       command_code "$@"
+      ;;
+    issue)
+      shift
+      command_issue "$@"
       ;;
     enter)
       shift

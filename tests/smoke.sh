@@ -8,6 +8,8 @@ ORIGIN_DIR="${TMP_DIR}/origin.git"
 HOOKS_DIR="${TMP_DIR}/hooks"
 WORKTREE_DIR="${TMP_DIR}/.vibe/demo/smoke-test"
 WORKTREE_FINISH_DIR="${TMP_DIR}/.vibe/demo/worktree-finish"
+ISSUE_WORKTREE_DIR="${TMP_DIR}/.vibe/demo/9-issue-aware-vibe-creation"
+TITLE_ONLY_ISSUE_WORKTREE_DIR="${TMP_DIR}/.vibe/demo/issue-title-only-branch"
 AUTO_EDITOR_WORKTREE_DIR="${TMP_DIR}/.vibe/demo/auto-editor"
 ALWAYS_EDITOR_WORKTREE_DIR="${TMP_DIR}/.vibe/demo/always-editor"
 NEVER_EDITOR_WORKTREE_DIR="${TMP_DIR}/.vibe/demo/never-editor"
@@ -21,6 +23,8 @@ SHELL_WORKTREE_DIR="${TMP_DIR}/.vibe/shell-demo/shell-jump"
 FAKE_BIN_DIR="${TMP_DIR}/fake-bin"
 CODE_LOG="${TMP_DIR}/code.log"
 CODEX_LOG="${TMP_DIR}/codex.log"
+ISSUE_9_TITLE_FILE="${TMP_DIR}/issue-9-title.txt"
+ISSUE_10_TITLE_FILE="${TMP_DIR}/issue-10-title.txt"
 EXPECTED_SHELL_REPO_DIR=""
 EXPECTED_SHELL_WORKTREE_DIR=""
 EXPECTED_WORKTREE_DIR=""
@@ -49,6 +53,37 @@ cat > "${FAKE_BIN_DIR}/codex" <<EOF
 printf '%s\n' "\$*" >> "${CODEX_LOG}"
 EOF
 chmod +x "${FAKE_BIN_DIR}/codex"
+
+cat > "${FAKE_BIN_DIR}/gh" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ "\${1:-}" = "issue" ] && [ "\${2:-}" = "view" ]; then
+  number="\${3:-}"
+  case "\${number}" in
+    9)
+      title="\$(<"${ISSUE_9_TITLE_FILE}")"
+      ;;
+    10)
+      title="\$(<"${ISSUE_10_TITLE_FILE}")"
+      ;;
+    *)
+      printf 'fake gh: unknown issue %s\n' "\${number}" >&2
+      exit 1
+      ;;
+  esac
+
+  printf '%s\t%s\t%s\n' "\${number}" "\${title}" "https://github.com/sailscastshq/git-vibe/issues/\${number}"
+  exit 0
+fi
+
+printf 'fake gh: unsupported args: %s\n' "\$*" >&2
+exit 1
+EOF
+chmod +x "${FAKE_BIN_DIR}/gh"
+
+printf 'Issue aware vibe creation\n' > "${ISSUE_9_TITLE_FILE}"
+printf 'Issue title only branch\n' > "${ISSUE_10_TITLE_FILE}"
 
 mkdir -p "${HOOKS_DIR}"
 for hook in pre-commit commit-msg pre-push; do
@@ -143,6 +178,62 @@ if git -C "${REPO_DIR}" show-ref --verify --quiet refs/heads/feat/worktree-finis
 fi
 
 printf 'smoke: worktree finish ok\n'
+
+ISSUE_CODE_OUTPUT="$(
+  cd "${REPO_DIR}" >/dev/null
+  PATH="${FAKE_BIN_DIR}:$PATH" "${ROOT}/bin/git-vibe" code 9
+)"
+
+[[ -d "${ISSUE_WORKTREE_DIR}" ]] || fail "issue-aware code did not create the expected worktree"
+[[ "${ISSUE_CODE_OUTPUT}" == *"Started feat/9-issue-aware-vibe-creation"* ]] || fail "issue-aware code did not create the expected branch"
+[[ "${ISSUE_CODE_OUTPUT}" == *"Issue: #9 Issue aware vibe creation"* ]] || fail "issue-aware code did not print the issue context"
+[[ "$(git -C "${REPO_DIR}" config --get vibe.issue.9.branch)" == "feat/9-issue-aware-vibe-creation" ]] || fail "issue-aware code did not remember the issue branch mapping"
+
+printf 'Issue title changed later\n' > "${ISSUE_9_TITLE_FILE}"
+
+ISSUE_REOPEN_OUTPUT="$(
+  cd "${REPO_DIR}" >/dev/null
+  PATH="${FAKE_BIN_DIR}:$PATH" "${ROOT}/bin/git-vibe" code 9
+)"
+
+[[ "${ISSUE_REOPEN_OUTPUT}" == *"Opened feat/9-issue-aware-vibe-creation"* ]] || fail "issue-aware code did not reopen the original branch after the issue title changed"
+[[ "${ISSUE_REOPEN_OUTPUT}" == *"Issue: #9 Issue aware vibe creation"* ]] || fail "issue-aware reopen did not keep the original issue metadata"
+
+ISSUE_CHECK_OUTPUT="$(
+  cd "${REPO_DIR}" >/dev/null
+  "${ROOT}/bin/git-vibe" check 9
+)"
+[[ "${ISSUE_CHECK_OUTPUT}" == *"Branch: feat/9-issue-aware-vibe-creation"* ]] || fail "check did not resolve the issue number to the remembered branch"
+
+printf '\nIssue change\n' >> "${ISSUE_WORKTREE_DIR}/README.md"
+git -C "${ISSUE_WORKTREE_DIR}" add README.md
+git -C "${ISSUE_WORKTREE_DIR}" commit -m "feat: update readme from issue vibe" >/dev/null
+
+(
+  cd "${REPO_DIR}" >/dev/null
+  "${ROOT}/bin/git-vibe" finish --local 9 >/dev/null
+)
+
+[[ ! -d "${ISSUE_WORKTREE_DIR}" ]] || fail "issue-aware finish did not remove the worktree"
+if git -C "${REPO_DIR}" show-ref --verify --quiet refs/heads/feat/9-issue-aware-vibe-creation; then
+  fail "issue-aware finish did not delete the feature branch"
+fi
+
+git -C "${REPO_DIR}" config vibe.issueBranchStyle title-only
+
+ISSUE_COMMAND_OUTPUT="$(
+  cd "${REPO_DIR}" >/dev/null
+  PATH="${FAKE_BIN_DIR}:$PATH" "${ROOT}/bin/git-vibe" issue 10
+)"
+
+[[ -d "${TITLE_ONLY_ISSUE_WORKTREE_DIR}" ]] || fail "issue command did not create the title-only worktree"
+[[ "${ISSUE_COMMAND_OUTPUT}" == *"Started feat/issue-title-only-branch"* ]] || fail "issue command did not honor vibe.issueBranchStyle=title-only"
+[[ "$(git -C "${REPO_DIR}" config --get vibe.issue.10.branch)" == "feat/issue-title-only-branch" ]] || fail "issue command did not remember the title-only branch mapping"
+git -C "${REPO_DIR}" worktree remove "${TITLE_ONLY_ISSUE_WORKTREE_DIR}" >/dev/null
+git -C "${REPO_DIR}" branch -d feat/issue-title-only-branch >/dev/null
+git -C "${REPO_DIR}" config --unset vibe.issueBranchStyle
+
+printf 'smoke: issue flow ok\n'
 
 git -C "${REPO_DIR}" config vibe.openEditor auto
 : > "${CODE_LOG}"

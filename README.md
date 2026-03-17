@@ -5,6 +5,7 @@ Git Vibe is a lightweight Git workflow for teams that ship from `main`, keep all
 The command surface is intentionally small:
 
 - `git vibe code <name>`
+- `git vibe issue <number>`
 - `git vibe enter [name]`
 - `git vibe open [name]`
 - `git vibe diff [name]`
@@ -36,7 +37,7 @@ Git Vibe is also built for AI orchestration. When every `feat/*` branch gets its
 ## What the workflow includes
 
 - A portable `git-vibe` executable exposed as `git vibe ...`
-- `code`, `enter`, `open`, `diff`, `finish`, `release`, `ship`, `list`, `status`, `check`, `path`, `prune`, and `version` commands
+- `code`, `issue`, `enter`, `open`, `diff`, `finish`, `release`, `ship`, `list`, `status`, `check`, `path`, `prune`, and `version` commands
 - Global hook wrappers for `pre-commit`, `commit-msg`, and `pre-push`
 - Semantic commit enforcement
 - Base-branch protection against direct commits and pushes
@@ -110,6 +111,13 @@ git vc fallback-app-urls
 git vr 0.0.2 --push
 ```
 
+If your team starts from GitHub issues, Git Vibe can also start directly from an issue number:
+
+```bash
+git vibe code 9
+git vibe issue 9
+```
+
 ## Workflow
 
 Start a vibe from a clean `main` checkout:
@@ -128,6 +136,8 @@ That creates:
 Do all work inside that worktree. Even fixes and urgent patches still live under `feat/*`.
 
 If you rerun `git vibe code fallback-app-urls`, Git Vibe reopens the existing worktree instead of creating a duplicate branch.
+
+If you start from an issue number, Git Vibe fetches the issue title through `gh` and creates a deterministic branch such as `feat/9-issue-aware-vibe-creation`. Later reruns of `git vibe code 9` or `git vibe issue 9` reopen that same vibe even if the issue title changes on GitHub.
 
 When it opens or reopens a vibe, Git Vibe also prints a short workspace summary with the branch, base, path, compare target, and current change state. That makes the worktree feel anchored even in tools that do not visibly switch context for you.
 
@@ -170,7 +180,7 @@ git vibe finish --sync fallback-app-urls
 
 ## Commands
 
-### `git vibe code [--editor] [--no-editor] [--codex|--vscode] <name>`
+### `git vibe code [--editor] [--no-editor] [--codex|--vscode] <name|number>`
 
 Creates or reopens a `feat/<slug>` worktree. If the vibe does not exist yet, Git Vibe creates the branch from `main` and opens it. If it already exists, Git Vibe jumps back into that same worktree instead of creating a duplicate.
 
@@ -178,6 +188,12 @@ Example:
 
 ```bash
 git vibe code add-billing-webhook
+```
+
+If you pass a GitHub issue number instead of a name, Git Vibe uses `gh issue view` to derive the branch slug and remembers the issue-to-branch mapping locally:
+
+```bash
+git vibe code 9
 ```
 
 Workspace launch follows `vibe.openEditor`, which accepts `auto`, `always`, or `never`.
@@ -189,6 +205,14 @@ Workspace launch follows `vibe.openEditor`, which accepts `auto`, `always`, or `
 Use `--editor` or `--no-editor` to override the launch policy for a single run. Use `--codex` or `--vscode` when you want to force a specific app for that one command.
 
 After opening a vibe, Git Vibe prints a context summary with the branch, base, path, compare target, and current change state so you can orient yourself quickly in Codex, VS Code, or a plain terminal.
+
+### `git vibe issue [--editor] [--no-editor] [--codex|--vscode] <number>`
+
+Explicit issue-first alias for `git vibe code <number>`.
+
+- use this when you want the CLI to read clearly as “start work from issue 9”
+- Git Vibe requires `gh` only when it needs to fetch issue metadata for a new issue-driven vibe
+- once the vibe exists, Git Vibe can reopen it by issue number from the stored branch mapping
 
 ### `git vibe enter [name]`
 
@@ -356,6 +380,21 @@ git config vibe.openWorkspaceWith codex
 ```
 
 `vibe.openWorkspaceWith=auto` prefers Codex Desktop inside a Codex shell and otherwise uses VS Code when available.
+
+Issue-driven branch naming:
+
+```bash
+git config --global vibe.issueBranchStyle number-and-title
+git config vibe.issueBranchStyle title-only
+```
+
+Supported values are:
+
+- `number-and-title` for branches like `feat/9-issue-aware-vibe-creation`
+- `number-only` for branches like `feat/9`
+- `title-only` for branches like `feat/issue-aware-vibe-creation`
+
+Git Vibe stores the issue-to-branch mapping locally so rerunning `git vibe code 9` keeps reopening the original vibe even if the GitHub issue title later changes.
 
 To block raw `main` pushes in a specific repo:
 

@@ -39,7 +39,16 @@ Open a vibe:
 git vibe code <name>
 ```
 
+Open a vibe directly from a GitHub issue:
+
+```bash
+git vibe code <number>
+git vibe issue <number>
+```
+
 Workspace launch follows `vibe.openEditor=auto|always|never`. The default is `auto`, which opens a workspace app only in interactive terminals. Use `--editor` or `--no-editor` to override that for one run, and `--codex` or `--vscode` to force the target app. After opening a vibe, Git Vibe should print enough branch/base/diff context that the worktree feels anchored even when the editor or terminal does not visibly switch for you.
+
+Issue-driven vibes use `gh issue view` to build deterministic branch names. `vibe.issueBranchStyle=number-and-title|number-only|title-only` controls the naming shape, and Git Vibe remembers the issue-to-branch mapping locally so later issue-title edits do not break reopen flows.
 
 Jump back into an existing vibe:
 
