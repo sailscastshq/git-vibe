@@ -12,14 +12,19 @@ AUTO_EDITOR_WORKTREE_DIR="${TMP_DIR}/.vibe/demo/auto-editor"
 ALWAYS_EDITOR_WORKTREE_DIR="${TMP_DIR}/.vibe/demo/always-editor"
 NEVER_EDITOR_WORKTREE_DIR="${TMP_DIR}/.vibe/demo/never-editor"
 FORCED_EDITOR_WORKTREE_DIR="${TMP_DIR}/.vibe/demo/forced-editor"
+CODEX_AUTO_WORKTREE_DIR="${TMP_DIR}/.vibe/demo/codex-auto"
+OPEN_WORKSPACE_DIR="${TMP_DIR}/.vibe/demo/open-workspace"
 INSTALL_HOME="${TMP_DIR}/home"
 INSTALL_DIR="${TMP_DIR}/.git-vibe"
 SHELL_REPO_DIR="${TMP_DIR}/shell-demo"
 SHELL_WORKTREE_DIR="${TMP_DIR}/.vibe/shell-demo/shell-jump"
 FAKE_BIN_DIR="${TMP_DIR}/fake-bin"
 CODE_LOG="${TMP_DIR}/code.log"
+CODEX_LOG="${TMP_DIR}/codex.log"
 EXPECTED_SHELL_REPO_DIR=""
 EXPECTED_SHELL_WORKTREE_DIR=""
+EXPECTED_WORKTREE_DIR=""
+EXPECTED_CODEX_AUTO_WORKTREE_DIR=""
 
 cleanup() {
   rm -rf "${TMP_DIR}"
@@ -38,6 +43,12 @@ cat > "${FAKE_BIN_DIR}/code" <<EOF
 printf '%s\n' "\$*" >> "${CODE_LOG}"
 EOF
 chmod +x "${FAKE_BIN_DIR}/code"
+
+cat > "${FAKE_BIN_DIR}/codex" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "${CODEX_LOG}"
+EOF
+chmod +x "${FAKE_BIN_DIR}/codex"
 
 mkdir -p "${HOOKS_DIR}"
 for hook in pre-commit commit-msg pre-push; do
@@ -65,14 +76,38 @@ git -C "${REPO_DIR}" config vibe.worktreeRoot ../.vibe
 git -C "${REPO_DIR}" config vibe.disallowPushOnBase false
 git -C "${REPO_DIR}" push -u origin main >/dev/null
 
-(
+SMOKE_CODE_OUTPUT="$(
   cd "${REPO_DIR}" >/dev/null
-  "${ROOT}/bin/git-vibe" code smoke-test >/dev/null
-)
+  "${ROOT}/bin/git-vibe" code smoke-test
+)"
 [[ -d "${WORKTREE_DIR}" ]] || fail "worktree was not created"
+EXPECTED_WORKTREE_DIR="$(cd "${WORKTREE_DIR}" && pwd -P)"
+[[ "${SMOKE_CODE_OUTPUT}" == *"Compare: main...feat/smoke-test"* ]] || fail "code did not print the expected compare context"
+[[ "${SMOKE_CODE_OUTPUT}" == *"Changes vs main: none"* ]] || fail "code did not print the expected clean summary"
 
 printf '\nSmoke test change\n' >> "${WORKTREE_DIR}/README.md"
 git -C "${WORKTREE_DIR}" add README.md
+
+SMOKE_DIFF_OUTPUT="$(
+  cd "${WORKTREE_DIR}" >/dev/null
+  "${ROOT}/bin/git-vibe" diff
+)"
+[[ "${SMOKE_DIFF_OUTPUT}" == *"Smoke test change"* ]] || fail "diff did not include the current vibe changes"
+
+SMOKE_CHECK_OUTPUT="$(
+  cd "${REPO_DIR}" >/dev/null
+  "${ROOT}/bin/git-vibe" check smoke-test
+)"
+[[ "${SMOKE_CHECK_OUTPUT}" == *"Branch: feat/smoke-test"* ]] || fail "check did not show the vibe branch context"
+[[ "${SMOKE_CHECK_OUTPUT}" == *"Compare: main...feat/smoke-test"* ]] || fail "check did not show the expected compare target"
+
+SMOKE_ENTER_OUTPUT="$(
+  cd "${REPO_DIR}" >/dev/null
+  "${ROOT}/bin/git-vibe" enter smoke-test --shell-output
+)"
+[[ "${SMOKE_ENTER_OUTPUT}" == *"Entering feat/smoke-test"* ]] || fail "enter did not announce the vibe it reopened"
+[[ "${SMOKE_ENTER_OUTPUT}" == *"__GIT_VIBE_CHDIR__=${EXPECTED_WORKTREE_DIR}"* ]] || fail "enter did not emit the expected shell jump marker"
+
 git -C "${WORKTREE_DIR}" commit -m "feat: update readme" >/dev/null
 
 (
@@ -114,7 +149,7 @@ git -C "${REPO_DIR}" config vibe.openEditor auto
 
 (
   cd "${REPO_DIR}" >/dev/null
-  PATH="${FAKE_BIN_DIR}:$PATH" "${ROOT}/bin/git-vibe" code auto-editor >/dev/null
+  PATH="${FAKE_BIN_DIR}:$PATH" CODEX_SHELL=0 CODEX_INTERNAL_ORIGINATOR_OVERRIDE= "${ROOT}/bin/git-vibe" code auto-editor >/dev/null
 )
 
 [[ -d "${AUTO_EDITOR_WORKTREE_DIR}" ]] || fail "auto editor worktree was not created"
@@ -127,7 +162,7 @@ git -C "${REPO_DIR}" config vibe.openEditor always
 
 (
   cd "${REPO_DIR}" >/dev/null
-  PATH="${FAKE_BIN_DIR}:$PATH" "${ROOT}/bin/git-vibe" code always-editor >/dev/null
+  PATH="${FAKE_BIN_DIR}:$PATH" CODEX_SHELL=0 CODEX_INTERNAL_ORIGINATOR_OVERRIDE= "${ROOT}/bin/git-vibe" code always-editor >/dev/null
 )
 
 [[ -d "${ALWAYS_EDITOR_WORKTREE_DIR}" ]] || fail "always editor worktree was not created"
@@ -140,7 +175,7 @@ git -C "${REPO_DIR}" config vibe.openEditor never
 
 (
   cd "${REPO_DIR}" >/dev/null
-  PATH="${FAKE_BIN_DIR}:$PATH" "${ROOT}/bin/git-vibe" code never-editor >/dev/null
+  PATH="${FAKE_BIN_DIR}:$PATH" CODEX_SHELL=0 CODEX_INTERNAL_ORIGINATOR_OVERRIDE= "${ROOT}/bin/git-vibe" code never-editor >/dev/null
 )
 
 [[ -d "${NEVER_EDITOR_WORKTREE_DIR}" ]] || fail "never editor worktree was not created"
@@ -152,7 +187,7 @@ git -C "${REPO_DIR}" branch -d feat/never-editor >/dev/null
 
 (
   cd "${REPO_DIR}" >/dev/null
-  PATH="${FAKE_BIN_DIR}:$PATH" "${ROOT}/bin/git-vibe" code --editor forced-editor >/dev/null
+  PATH="${FAKE_BIN_DIR}:$PATH" CODEX_SHELL=0 CODEX_INTERNAL_ORIGINATOR_OVERRIDE= "${ROOT}/bin/git-vibe" code --editor forced-editor >/dev/null
 )
 
 [[ -d "${FORCED_EDITOR_WORKTREE_DIR}" ]] || fail "forced editor worktree was not created"
@@ -161,11 +196,45 @@ git -C "${REPO_DIR}" worktree remove "${FORCED_EDITOR_WORKTREE_DIR}" >/dev/null
 git -C "${REPO_DIR}" branch -d feat/forced-editor >/dev/null
 git -C "${REPO_DIR}" config --unset vibe.openEditor
 
+git -C "${REPO_DIR}" config vibe.openEditor always
+git -C "${REPO_DIR}" config vibe.openWorkspaceWith auto
+: > "${CODE_LOG}"
+: > "${CODEX_LOG}"
+
+(
+  cd "${REPO_DIR}" >/dev/null
+  PATH="${FAKE_BIN_DIR}:$PATH" CODEX_SHELL=1 CODEX_INTERNAL_ORIGINATOR_OVERRIDE="Codex Desktop" "${ROOT}/bin/git-vibe" code codex-auto >/dev/null
+)
+
+[[ -d "${CODEX_AUTO_WORKTREE_DIR}" ]] || fail "codex auto worktree was not created"
+EXPECTED_CODEX_AUTO_WORKTREE_DIR="$(cd "${CODEX_AUTO_WORKTREE_DIR}" && pwd -P)"
+[[ ! -s "${CODE_LOG}" ]] || fail "auto workspace app should prefer Codex over VS Code in a Codex shell"
+[[ "$(<"${CODEX_LOG}")" == *"app ${EXPECTED_CODEX_AUTO_WORKTREE_DIR}"* ]] || fail "auto workspace app did not launch Codex Desktop for the vibe"
+git -C "${REPO_DIR}" worktree remove "${CODEX_AUTO_WORKTREE_DIR}" >/dev/null
+git -C "${REPO_DIR}" branch -d feat/codex-auto >/dev/null
+
+: > "${CODE_LOG}"
+: > "${CODEX_LOG}"
+
+(
+  cd "${REPO_DIR}" >/dev/null
+  "${ROOT}/bin/git-vibe" code --no-editor open-workspace >/dev/null
+  PATH="${FAKE_BIN_DIR}:$PATH" "${ROOT}/bin/git-vibe" open --vscode open-workspace >/dev/null
+)
+
+[[ -d "${OPEN_WORKSPACE_DIR}" ]] || fail "open workspace worktree was not created"
+[[ -s "${CODE_LOG}" ]] || fail "open --vscode should launch VS Code"
+[[ ! -s "${CODEX_LOG}" ]] || fail "open --vscode should not launch Codex"
+git -C "${REPO_DIR}" worktree remove "${OPEN_WORKSPACE_DIR}" >/dev/null
+git -C "${REPO_DIR}" branch -d feat/open-workspace >/dev/null
+git -C "${REPO_DIR}" config --unset vibe.openWorkspaceWith
+git -C "${REPO_DIR}" config --unset vibe.openEditor
+
 printf 'smoke: editor modes ok\n'
 
 (
   cd "${REPO_DIR}" >/dev/null
-  "${ROOT}/bin/git-vibe" release 0.1.0 --push >/dev/null
+  "${ROOT}/bin/git-vibe" ship 0.1.0 --push >/dev/null
 )
 
 [[ "$(git -C "${REPO_DIR}" log -1 --pretty=%s)" == "chore(release): v0.1.0" ]] || fail "release did not create the expected commit"
@@ -230,6 +299,15 @@ AUTO_CD_OUTPUT="$(HOME="${INSTALL_HOME}" SHELL=/bin/bash bash -lc '
 EXPECTED_SHELL_WORKTREE_DIR="$(cd "${SHELL_WORKTREE_DIR}" && pwd -P)"
 
 [[ "${AUTO_CD_OUTPUT}" == "${EXPECTED_SHELL_WORKTREE_DIR}" ]] || fail "shell integration did not move into the new worktree"
+
+ENTER_OUTPUT="$(HOME="${INSTALL_HOME}" SHELL=/bin/bash bash -lc '
+  source ~/.bashrc
+  cd "'"${SHELL_REPO_DIR}"'"
+  git vibe enter shell-jump >/dev/null
+  pwd -P
+')"
+
+[[ "${ENTER_OUTPUT}" == "${EXPECTED_SHELL_WORKTREE_DIR}" ]] || fail "shell integration did not move into the existing worktree after enter"
 
 FINISH_OUTPUT="$(HOME="${INSTALL_HOME}" SHELL=/bin/bash bash -lc '
   source ~/.bashrc

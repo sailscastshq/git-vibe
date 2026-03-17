@@ -57,6 +57,12 @@ open_editor_mode() {
   printf '%s\n' "${configured:-auto}"
 }
 
+workspace_app_setting() {
+  local configured
+  configured="$(git_config_get vibe.openWorkspaceWith)"
+  printf '%s\n' "${configured:-auto}"
+}
+
 validate_open_editor_mode() {
   case "$1" in
     auto|always|never)
@@ -81,6 +87,48 @@ should_open_editor() {
       ;;
     auto)
       [[ -t 0 && -t 1 ]]
+      ;;
+  esac
+}
+
+validate_workspace_app() {
+  case "$1" in
+    auto|codex|vscode)
+      ;;
+    *)
+      die "invalid vibe.openWorkspaceWith: $1 (expected auto, codex, or vscode)"
+      ;;
+  esac
+}
+
+in_codex_shell() {
+  [[ "${CODEX_SHELL:-0}" == "1" || "${CODEX_INTERNAL_ORIGINATOR_OVERRIDE:-}" == "Codex Desktop" ]]
+}
+
+resolve_workspace_app() {
+  local requested
+  requested="$1"
+  validate_workspace_app "${requested}"
+
+  case "${requested}" in
+    codex)
+      command -v codex >/dev/null 2>&1 || die "Codex CLI not found; install 'codex' or choose --vscode"
+      printf '%s\n' "codex"
+      ;;
+    vscode)
+      command -v code >/dev/null 2>&1 || die "VS Code CLI 'code' not found; install it or choose --codex"
+      printf '%s\n' "vscode"
+      ;;
+    auto)
+      if in_codex_shell && command -v codex >/dev/null 2>&1; then
+        printf '%s\n' "codex"
+      elif command -v code >/dev/null 2>&1; then
+        printf '%s\n' "vscode"
+      elif command -v codex >/dev/null 2>&1; then
+        printf '%s\n' "codex"
+      else
+        printf '\n'
+      fi
       ;;
   esac
 }
@@ -256,6 +304,106 @@ list_vibes_raw() {
   done < <(git worktree list --porcelain; printf '\n')
 }
 
+is_vibe_branch() {
+  local branch prefix
+  branch="$1"
+  prefix="$(branch_prefix)"
+  [[ -n "${branch}" && "${branch}" == "${prefix}"* ]]
+}
+
+resolve_vibe_branch() {
+  local branch slug
+
+  if [[ $# -gt 0 ]]; then
+    slug="$(slug_from_name "$*")"
+    branch="$(branch_from_slug "${slug}")"
+    branch_exists "${branch}" || die "vibe branch not found: ${branch}"
+    printf '%s\n' "${branch}"
+    return 0
+  fi
+
+  branch="$(current_branch)"
+  is_vibe_branch "${branch}" || die "run this command inside a vibe worktree or pass a vibe name"
+  printf '%s\n' "${branch}"
+}
+
+worktree_path_for_branch() {
+  local branch path
+  branch="$1"
+  path="$(find_worktree_for_branch "${branch}" || true)"
+
+  if [[ -n "${path}" ]]; then
+    printf '%s\n' "${path}"
+    return 0
+  fi
+
+  if [[ "$(current_branch)" == "${branch}" ]]; then
+    repo_root
+    return 0
+  fi
+
+  die "worktree not found for ${branch}"
+}
+
+vibe_merge_base() {
+  local base path
+  base="$1"
+  path="$2"
+  git -C "${path}" merge-base "${base}" HEAD
+}
+
+vibe_diff_shortstat() {
+  local merge_base path
+  merge_base="$1"
+  path="$2"
+  git -C "${path}" diff --shortstat "${merge_base}" || true
+}
+
+vibe_dirty_count() {
+  local path
+  path="$1"
+  git -C "${path}" status --porcelain | wc -l | tr -d ' '
+}
+
+vibe_untracked_files() {
+  local path
+  path="$1"
+  git -C "${path}" ls-files --others --exclude-standard
+}
+
+print_vibe_context() {
+  local branch path base merge_base diff_summary dirty_count behind ahead untracked_count
+  branch="$1"
+  path="$2"
+  base="$(base_branch)"
+  merge_base="$(vibe_merge_base "${base}" "${path}")"
+  diff_summary="$(vibe_diff_shortstat "${merge_base}" "${path}")"
+  dirty_count="$(vibe_dirty_count "${path}")"
+  untracked_count="$(vibe_untracked_files "${path}" | wc -l | tr -d ' ')"
+  read -r behind ahead < <(git rev-list --left-right --count "${base}...${branch}")
+
+  say "Context:"
+  say "  Branch: ${branch}"
+  say "  Base: ${base}"
+  say "  Path: ${path}"
+  say "  Compare: ${base}...${branch}"
+  say "  Ahead/behind vs ${base}: +${ahead}/-${behind}"
+
+  if [[ "${dirty_count}" == "0" ]]; then
+    say "  Working tree: clean"
+  else
+    say "  Working tree: ${dirty_count} uncommitted change(s)"
+  fi
+
+  if [[ -n "${diff_summary}" ]]; then
+    say "  Changes vs ${base}: ${diff_summary}"
+  elif [[ "${untracked_count}" != "0" ]]; then
+    say "  Changes vs ${base}: ${untracked_count} untracked file(s)"
+  else
+    say "  Changes vs ${base}: none"
+  fi
+}
+
 base_worktree_path() {
   local base path
   base="$(base_branch)"
@@ -319,11 +467,16 @@ print_help() {
 Git Vibe
 
 Usage:
-  git vibe code [--editor|--no-editor] <name>
+  git vibe code [--editor|--no-editor] [--codex|--vscode] <name>
+  git vibe enter [name]
+  git vibe open [--codex|--vscode] [name]
+  git vibe diff [name]
   git vibe finish [--local] [--sync] [name]
   git vibe release <version> [--push]
+  git vibe ship <version> [--push]
   git vibe list
-  git vibe status
+  git vibe status [name]
+  git vibe check [name]
   git vibe path <name>
   git vibe prune
   git vibe version
@@ -331,41 +484,60 @@ Usage:
 
 Examples:
   git vibe code fallback-app-urls
+  git vibe code --codex fallback-app-urls
   git vibe code --no-editor fallback-app-urls
+  git vibe enter fallback-app-urls
+  git vibe open fallback-app-urls
+  git vibe diff fallback-app-urls
   git vibe finish fallback-app-urls
   git vibe finish --sync fallback-app-urls
   git vibe finish --local fallback-app-urls
   git vibe release 0.0.2
+  git vibe ship 0.0.2 --push
   git vibe release 0.0.2 --push
 EOF
 }
 
-open_editor_for_path() {
-  local path
+open_workspace_for_path() {
+  local path app
   path="$1"
+  app="$2"
 
-  if ! command -v code >/dev/null 2>&1; then
-    say "Editor: skipped (VS Code CLI 'code' not found)"
-    return 0
-  fi
+  case "${app}" in
+    codex)
+      if codex app "${path}" >/dev/null 2>&1; then
+        say "Workspace: opened in Codex Desktop"
+      else
+        say "Workspace: launch failed (Codex Desktop)"
+      fi
+      ;;
+    vscode)
+      if [[ "${TERM_PROGRAM:-}" == "vscode" ]]; then
+        if code -r "${path}" >/dev/null 2>&1 || code "${path}" >/dev/null 2>&1; then
+          say "Workspace: opened in VS Code"
+        else
+          say "Workspace: launch failed (VS Code)"
+        fi
+        return 0
+      fi
 
-  if [[ "${TERM_PROGRAM:-}" == "vscode" ]]; then
-    code -r "${path}" >/dev/null 2>&1 || code "${path}" >/dev/null 2>&1 || true
-    say "Editor: opened in VS Code"
-    return 0
-  fi
-
-  code "${path}" >/dev/null 2>&1 || true
-  say "Editor: opened in VS Code"
+      if code "${path}" >/dev/null 2>&1; then
+        say "Workspace: opened in VS Code"
+      else
+        say "Workspace: launch failed (VS Code)"
+      fi
+      ;;
+  esac
 }
 
 command_code() {
-  local name slug branch base path shell_output open_editor action base_path editor_mode
+  local name slug branch base path shell_output open_editor action base_path editor_mode workspace_app workspace_app_override
   local -a name_parts
   require_repo
 
   shell_output="false"
   open_editor=""
+  workspace_app_override=""
   name_parts=()
 
   while [[ $# -gt 0 ]]; do
@@ -378,6 +550,12 @@ command_code() {
         ;;
       --no-editor)
         open_editor="never"
+        ;;
+      --codex)
+        workspace_app_override="codex"
+        ;;
+      --vscode)
+        workspace_app_override="vscode"
         ;;
       -h|--help)
         print_help
@@ -436,6 +614,13 @@ command_code() {
 
   say "${action} ${branch}"
   say "Path: ${path}"
+  print_vibe_context "${branch}" "${path}"
+  say ""
+  say "Next:"
+  say "  git vibe enter ${slug}"
+  say "  git vibe open ${slug}"
+  say "  git -C ${path} status --short"
+  say "  git vibe diff ${slug}"
 
   editor_mode="$(open_editor_mode)"
   if [[ -n "${open_editor}" ]]; then
@@ -443,7 +628,16 @@ command_code() {
   fi
 
   if should_open_editor "${editor_mode}"; then
-    open_editor_for_path "${path}"
+    workspace_app="$(workspace_app_setting)"
+    if [[ -n "${workspace_app_override}" ]]; then
+      workspace_app="${workspace_app_override}"
+    fi
+    workspace_app="$(resolve_workspace_app "${workspace_app}")"
+    if [[ -n "${workspace_app}" ]]; then
+      open_workspace_for_path "${path}" "${workspace_app}"
+    else
+      say "Workspace: skipped (no supported app found)"
+    fi
   fi
 
   if [[ "${shell_output}" == "true" ]]; then
@@ -453,6 +647,99 @@ command_code() {
 
 command_start() {
   command_code --no-editor "$@"
+}
+
+command_enter() {
+  local branch path shell_output
+  local -a name_parts
+  require_repo
+
+  shell_output="false"
+  name_parts=()
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --shell-output)
+        shell_output="true"
+        ;;
+      -h|--help)
+        print_help
+        exit 0
+        ;;
+      *)
+        name_parts+=("$1")
+        ;;
+    esac
+    shift
+  done
+
+  branch="$(resolve_vibe_branch "${name_parts[@]}")"
+  path="$(worktree_path_for_branch "${branch}")"
+
+  say "Entering ${branch}"
+  say "Path: ${path}"
+  print_vibe_context "${branch}" "${path}"
+
+  if [[ "${shell_output}" == "true" ]]; then
+    say_shell_chdir "${path}"
+  fi
+}
+
+command_open() {
+  local branch path workspace_app
+  local -a name_parts
+  require_repo
+
+  workspace_app="$(workspace_app_setting)"
+  name_parts=()
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --codex)
+        workspace_app="codex"
+        ;;
+      --vscode)
+        workspace_app="vscode"
+        ;;
+      -h|--help)
+        print_help
+        exit 0
+        ;;
+      *)
+        name_parts+=("$1")
+        ;;
+    esac
+    shift
+  done
+
+  branch="$(resolve_vibe_branch "${name_parts[@]}")"
+  path="$(worktree_path_for_branch "${branch}")"
+  workspace_app="$(resolve_workspace_app "${workspace_app}")"
+  [[ -n "${workspace_app}" ]] || die "no supported workspace app found; install 'code' or 'codex'"
+
+  say "Opening ${branch}"
+  say "Path: ${path}"
+  print_vibe_context "${branch}" "${path}"
+  open_workspace_for_path "${path}" "${workspace_app}"
+}
+
+command_diff() {
+  local branch path base merge_base untracked_files
+  require_repo
+
+  branch="$(resolve_vibe_branch "$@")"
+  path="$(worktree_path_for_branch "${branch}")"
+  base="$(base_branch)"
+  merge_base="$(vibe_merge_base "${base}" "${path}")"
+
+  git -C "${path}" diff "${merge_base}"
+
+  untracked_files="$(vibe_untracked_files "${path}")"
+  if [[ -n "${untracked_files}" ]]; then
+    say ""
+    say "Untracked files:"
+    printf '%s\n' "${untracked_files}"
+  fi
 }
 
 command_finish() {
@@ -658,15 +945,32 @@ command_list() {
 }
 
 command_status() {
-  local base current prefix root editor_mode
+  local base current prefix root editor_mode workspace_app branch path
+  local -a name_parts
   require_repo
+
+  name_parts=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help)
+        print_help
+        exit 0
+        ;;
+      *)
+        name_parts+=("$1")
+        ;;
+    esac
+    shift
+  done
 
   base="$(base_branch)"
   current="$(current_branch)"
   prefix="$(branch_prefix)"
   root="$(vibe_root)"
   editor_mode="$(open_editor_mode)"
+  workspace_app="$(workspace_app_setting)"
   validate_open_editor_mode "${editor_mode}"
+  validate_workspace_app "${workspace_app}"
 
   say "Repo: $(repo_root)"
   say "Base branch: ${base}"
@@ -674,8 +978,26 @@ command_status() {
   say "Branch prefix: ${prefix}"
   say "Vibe root: ${root}"
   say "Open editor: ${editor_mode}"
+  say "Open workspace with: ${workspace_app}"
   say ""
+
+  if [[ ${#name_parts[@]} -gt 0 ]]; then
+    branch="$(resolve_vibe_branch "${name_parts[@]}")"
+    path="$(worktree_path_for_branch "${branch}")"
+    print_vibe_context "${branch}" "${path}"
+    return 0
+  fi
+
+  if is_vibe_branch "${current}"; then
+    print_vibe_context "${current}" "$(repo_root)"
+    say ""
+  fi
+
   command_list
+}
+
+command_check() {
+  command_status "$@"
 }
 
 command_path() {
@@ -694,6 +1016,10 @@ command_prune() {
   require_repo
   git worktree prune
   say "Pruned stale worktree metadata"
+}
+
+command_ship() {
+  command_release "$@"
 }
 
 check_semantic_commit() {
@@ -786,6 +1112,18 @@ main() {
       shift
       command_code "$@"
       ;;
+    enter)
+      shift
+      command_enter "$@"
+      ;;
+    open)
+      shift
+      command_open "$@"
+      ;;
+    diff)
+      shift
+      command_diff "$@"
+      ;;
     start)
       shift
       command_start "$@"
@@ -798,6 +1136,10 @@ main() {
       shift
       command_release "$@"
       ;;
+    ship)
+      shift
+      command_ship "$@"
+      ;;
     list)
       shift
       command_list "$@"
@@ -805,6 +1147,10 @@ main() {
     status)
       shift
       command_status "$@"
+      ;;
+    check)
+      shift
+      command_check "$@"
       ;;
     path)
       shift

@@ -39,7 +39,7 @@ git() {
     return "\$__git_vibe_status"
   fi
 
-  if [ "\$1" = "vibe" ] && { [ "\$2" = "code" ] || [ "\$2" = "start" ] || [ "\$2" = "finish" ]; }; then
+  if [ "\$1" = "vibe" ] && { [ "\$2" = "code" ] || [ "\$2" = "start" ] || [ "\$2" = "enter" ] || [ "\$2" = "finish" ]; }; then
     __git_vibe_output="\$(command git "\$@" --shell-output 2>&1)"
     __git_vibe_status=\$?
     __git_vibe_path="\$(printf '%s\n' "\$__git_vibe_output" | sed -n 's/^__GIT_VIBE_CHDIR__=//p' | tail -n 1)"
@@ -151,7 +151,7 @@ Current terminal note:
   The installer cannot change the current shell session that launched it.
   Open a new terminal, run: source "${PROFILE_FILE}", or run:
   ${PATH_LINE}
-  After the profile is loaded, git vibe code/finish and git vc will auto-jump between worktrees.
+  After the profile is loaded, git vibe code/enter/finish and git vc will auto-jump between worktrees.
 
 After reloading your shell, run:
   git vibe version
