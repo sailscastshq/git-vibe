@@ -5,11 +5,14 @@ Git Vibe is a lightweight Git workflow for teams that ship from `main`, keep all
 The command surface is intentionally small:
 
 - `git vibe code <name>`
+- `git vibe diff [name]`
+- `git vibe check [name]`
 - `git vibe finish <name>`
 - `git vibe release <version>`
+- `git vibe ship <version>`
 - `git vibe release <version> --push`
 - `git vibe list`
-- `git vibe status`
+- `git vibe status [name]`
 - `git vibe prune`
 
 Under the hood, every vibe is a short-lived `feat/*` branch that is created as its own worktree. That gives humans and AI agents isolated lanes to work in without polluting `main`.
@@ -31,7 +34,7 @@ Git Vibe is also built for AI orchestration. When every `feat/*` branch gets its
 ## What the workflow includes
 
 - A portable `git-vibe` executable exposed as `git vibe ...`
-- `code`, `finish`, `release`, `list`, `status`, `path`, `prune`, and `version` commands
+- `code`, `diff`, `finish`, `release`, `ship`, `list`, `status`, `check`, `path`, `prune`, and `version` commands
 - Global hook wrappers for `pre-commit`, `commit-msg`, and `pre-push`
 - Semantic commit enforcement
 - Base-branch protection against direct commits and pushes
@@ -124,6 +127,8 @@ Do all work inside that worktree. Even fixes and urgent patches still live under
 
 If you rerun `git vibe code fallback-app-urls`, Git Vibe reopens the existing worktree instead of creating a duplicate branch.
 
+When it opens or reopens a vibe, Git Vibe also prints a short workspace summary with the branch, base, path, compare target, and current change state. That makes the worktree feel anchored even in tools that do not visibly switch context for you.
+
 When the feature is merged locally:
 
 ```bash
@@ -169,6 +174,16 @@ Editor launch follows `vibe.openEditor`, which accepts `auto`, `always`, or `nev
 
 Use `--editor` or `--no-editor` to override the config for a single run.
 
+After opening a vibe, Git Vibe prints a context summary with the branch, base, path, compare target, and current change state so you can orient yourself quickly in Codex, VS Code, or a plain terminal.
+
+### `git vibe diff [name]`
+
+Shows the current vibe's cumulative diff against its base branch.
+
+- run it inside a vibe worktree with no name to inspect the current lane
+- pass a vibe name from `main` when you want to inspect another active worktree
+- untracked files are called out explicitly so they do not disappear from the mental model
+
 ### `git vibe finish [--local] [--sync] [name]`
 
 Finishes a vibe safely.
@@ -208,13 +223,21 @@ git vibe release 0.0.2 --push
 
 That uses the maintainer override internally, so it still works even in repos that explicitly block raw `main` pushes.
 
+### `git vibe ship <version> [--push]`
+
+Alias for `git vibe release <version> [--push]`.
+
 ### `git vibe list`
 
 Lists active feature worktrees for the current repository.
 
-### `git vibe status`
+### `git vibe status [name]`
 
-Shows the current repository, base branch, branch prefix, worktree root, and active vibes.
+Shows the current repository, base branch, branch prefix, worktree root, and active vibes. When run inside a vibe worktree, or when you pass a vibe name, it also prints a focused workspace summary for that vibe.
+
+### `git vibe check [name]`
+
+Alias for `git vibe status [name]`.
 
 ### `git vibe path <name>`
 

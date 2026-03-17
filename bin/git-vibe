@@ -256,6 +256,106 @@ list_vibes_raw() {
   done < <(git worktree list --porcelain; printf '\n')
 }
 
+is_vibe_branch() {
+  local branch prefix
+  branch="$1"
+  prefix="$(branch_prefix)"
+  [[ -n "${branch}" && "${branch}" == "${prefix}"* ]]
+}
+
+resolve_vibe_branch() {
+  local branch slug
+
+  if [[ $# -gt 0 ]]; then
+    slug="$(slug_from_name "$*")"
+    branch="$(branch_from_slug "${slug}")"
+    branch_exists "${branch}" || die "vibe branch not found: ${branch}"
+    printf '%s\n' "${branch}"
+    return 0
+  fi
+
+  branch="$(current_branch)"
+  is_vibe_branch "${branch}" || die "run this command inside a vibe worktree or pass a vibe name"
+  printf '%s\n' "${branch}"
+}
+
+worktree_path_for_branch() {
+  local branch path
+  branch="$1"
+  path="$(find_worktree_for_branch "${branch}" || true)"
+
+  if [[ -n "${path}" ]]; then
+    printf '%s\n' "${path}"
+    return 0
+  fi
+
+  if [[ "$(current_branch)" == "${branch}" ]]; then
+    repo_root
+    return 0
+  fi
+
+  die "worktree not found for ${branch}"
+}
+
+vibe_merge_base() {
+  local base path
+  base="$1"
+  path="$2"
+  git -C "${path}" merge-base "${base}" HEAD
+}
+
+vibe_diff_shortstat() {
+  local merge_base path
+  merge_base="$1"
+  path="$2"
+  git -C "${path}" diff --shortstat "${merge_base}" || true
+}
+
+vibe_dirty_count() {
+  local path
+  path="$1"
+  git -C "${path}" status --porcelain | wc -l | tr -d ' '
+}
+
+vibe_untracked_files() {
+  local path
+  path="$1"
+  git -C "${path}" ls-files --others --exclude-standard
+}
+
+print_vibe_context() {
+  local branch path base merge_base diff_summary dirty_count behind ahead untracked_count
+  branch="$1"
+  path="$2"
+  base="$(base_branch)"
+  merge_base="$(vibe_merge_base "${base}" "${path}")"
+  diff_summary="$(vibe_diff_shortstat "${merge_base}" "${path}")"
+  dirty_count="$(vibe_dirty_count "${path}")"
+  untracked_count="$(vibe_untracked_files "${path}" | wc -l | tr -d ' ')"
+  read -r behind ahead < <(git rev-list --left-right --count "${base}...${branch}")
+
+  say "Context:"
+  say "  Branch: ${branch}"
+  say "  Base: ${base}"
+  say "  Path: ${path}"
+  say "  Compare: ${base}...${branch}"
+  say "  Ahead/behind vs ${base}: +${ahead}/-${behind}"
+
+  if [[ "${dirty_count}" == "0" ]]; then
+    say "  Working tree: clean"
+  else
+    say "  Working tree: ${dirty_count} uncommitted change(s)"
+  fi
+
+  if [[ -n "${diff_summary}" ]]; then
+    say "  Changes vs ${base}: ${diff_summary}"
+  elif [[ "${untracked_count}" != "0" ]]; then
+    say "  Changes vs ${base}: ${untracked_count} untracked file(s)"
+  else
+    say "  Changes vs ${base}: none"
+  fi
+}
+
 base_worktree_path() {
   local base path
   base="$(base_branch)"
@@ -320,10 +420,13 @@ Git Vibe
 
 Usage:
   git vibe code [--editor|--no-editor] <name>
+  git vibe diff [name]
   git vibe finish [--local] [--sync] [name]
   git vibe release <version> [--push]
+  git vibe ship <version> [--push]
   git vibe list
-  git vibe status
+  git vibe status [name]
+  git vibe check [name]
   git vibe path <name>
   git vibe prune
   git vibe version
@@ -332,10 +435,12 @@ Usage:
 Examples:
   git vibe code fallback-app-urls
   git vibe code --no-editor fallback-app-urls
+  git vibe diff fallback-app-urls
   git vibe finish fallback-app-urls
   git vibe finish --sync fallback-app-urls
   git vibe finish --local fallback-app-urls
   git vibe release 0.0.2
+  git vibe ship 0.0.2 --push
   git vibe release 0.0.2 --push
 EOF
 }
@@ -436,6 +541,11 @@ command_code() {
 
   say "${action} ${branch}"
   say "Path: ${path}"
+  print_vibe_context "${branch}" "${path}"
+  say ""
+  say "Next:"
+  say "  git -C ${path} status --short"
+  say "  git vibe diff ${slug}"
 
   editor_mode="$(open_editor_mode)"
   if [[ -n "${open_editor}" ]]; then
@@ -453,6 +563,25 @@ command_code() {
 
 command_start() {
   command_code --no-editor "$@"
+}
+
+command_diff() {
+  local branch path base merge_base untracked_files
+  require_repo
+
+  branch="$(resolve_vibe_branch "$@")"
+  path="$(worktree_path_for_branch "${branch}")"
+  base="$(base_branch)"
+  merge_base="$(vibe_merge_base "${base}" "${path}")"
+
+  git -C "${path}" diff "${merge_base}"
+
+  untracked_files="$(vibe_untracked_files "${path}")"
+  if [[ -n "${untracked_files}" ]]; then
+    say ""
+    say "Untracked files:"
+    printf '%s\n' "${untracked_files}"
+  fi
 }
 
 command_finish() {
@@ -658,8 +787,23 @@ command_list() {
 }
 
 command_status() {
-  local base current prefix root editor_mode
+  local base current prefix root editor_mode branch path
+  local -a name_parts
   require_repo
+
+  name_parts=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help)
+        print_help
+        exit 0
+        ;;
+      *)
+        name_parts+=("$1")
+        ;;
+    esac
+    shift
+  done
 
   base="$(base_branch)"
   current="$(current_branch)"
@@ -675,7 +819,24 @@ command_status() {
   say "Vibe root: ${root}"
   say "Open editor: ${editor_mode}"
   say ""
+
+  if [[ ${#name_parts[@]} -gt 0 ]]; then
+    branch="$(resolve_vibe_branch "${name_parts[@]}")"
+    path="$(worktree_path_for_branch "${branch}")"
+    print_vibe_context "${branch}" "${path}"
+    return 0
+  fi
+
+  if is_vibe_branch "${current}"; then
+    print_vibe_context "${current}" "$(repo_root)"
+    say ""
+  fi
+
   command_list
+}
+
+command_check() {
+  command_status "$@"
 }
 
 command_path() {
@@ -694,6 +855,10 @@ command_prune() {
   require_repo
   git worktree prune
   say "Pruned stale worktree metadata"
+}
+
+command_ship() {
+  command_release "$@"
 }
 
 check_semantic_commit() {
@@ -786,6 +951,10 @@ main() {
       shift
       command_code "$@"
       ;;
+    diff)
+      shift
+      command_diff "$@"
+      ;;
     start)
       shift
       command_start "$@"
@@ -798,6 +967,10 @@ main() {
       shift
       command_release "$@"
       ;;
+    ship)
+      shift
+      command_ship "$@"
+      ;;
     list)
       shift
       command_list "$@"
@@ -805,6 +978,10 @@ main() {
     status)
       shift
       command_status "$@"
+      ;;
+    check)
+      shift
+      command_check "$@"
       ;;
     path)
       shift

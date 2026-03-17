@@ -65,14 +65,30 @@ git -C "${REPO_DIR}" config vibe.worktreeRoot ../.vibe
 git -C "${REPO_DIR}" config vibe.disallowPushOnBase false
 git -C "${REPO_DIR}" push -u origin main >/dev/null
 
-(
+SMOKE_CODE_OUTPUT="$(
   cd "${REPO_DIR}" >/dev/null
-  "${ROOT}/bin/git-vibe" code smoke-test >/dev/null
-)
+  "${ROOT}/bin/git-vibe" code smoke-test
+)"
 [[ -d "${WORKTREE_DIR}" ]] || fail "worktree was not created"
+[[ "${SMOKE_CODE_OUTPUT}" == *"Compare: main...feat/smoke-test"* ]] || fail "code did not print the expected compare context"
+[[ "${SMOKE_CODE_OUTPUT}" == *"Changes vs main: none"* ]] || fail "code did not print the expected clean summary"
 
 printf '\nSmoke test change\n' >> "${WORKTREE_DIR}/README.md"
 git -C "${WORKTREE_DIR}" add README.md
+
+SMOKE_DIFF_OUTPUT="$(
+  cd "${WORKTREE_DIR}" >/dev/null
+  "${ROOT}/bin/git-vibe" diff
+)"
+[[ "${SMOKE_DIFF_OUTPUT}" == *"Smoke test change"* ]] || fail "diff did not include the current vibe changes"
+
+SMOKE_CHECK_OUTPUT="$(
+  cd "${REPO_DIR}" >/dev/null
+  "${ROOT}/bin/git-vibe" check smoke-test
+)"
+[[ "${SMOKE_CHECK_OUTPUT}" == *"Branch: feat/smoke-test"* ]] || fail "check did not show the vibe branch context"
+[[ "${SMOKE_CHECK_OUTPUT}" == *"Compare: main...feat/smoke-test"* ]] || fail "check did not show the expected compare target"
+
 git -C "${WORKTREE_DIR}" commit -m "feat: update readme" >/dev/null
 
 (
@@ -165,7 +181,7 @@ printf 'smoke: editor modes ok\n'
 
 (
   cd "${REPO_DIR}" >/dev/null
-  "${ROOT}/bin/git-vibe" release 0.1.0 --push >/dev/null
+  "${ROOT}/bin/git-vibe" ship 0.1.0 --push >/dev/null
 )
 
 [[ "$(git -C "${REPO_DIR}" log -1 --pretty=%s)" == "chore(release): v0.1.0" ]] || fail "release did not create the expected commit"

@@ -39,7 +39,19 @@ Open a vibe:
 git vibe code <name>
 ```
 
-Editor launch follows `vibe.openEditor=auto|always|never`. The default is `auto`, which opens VS Code only in interactive terminals. Use `--editor` or `--no-editor` to override that for one run.
+Editor launch follows `vibe.openEditor=auto|always|never`. The default is `auto`, which opens VS Code only in interactive terminals. Use `--editor` or `--no-editor` to override that for one run. After opening a vibe, Git Vibe should print enough branch/base/diff context that the worktree feels anchored even when the editor or terminal does not visibly switch for you.
+
+Inspect a vibe diff:
+
+```bash
+git vibe diff <name>
+```
+
+Check vibe context:
+
+```bash
+git vibe check <name>
+```
 
 Open a vibe with the short alias:
 
@@ -75,6 +87,12 @@ Cut and push a release directly from `main`:
 
 ```bash
 git vibe release <version> --push
+```
+
+Cut a release with the friendlier alias:
+
+```bash
+git vibe ship <version> --push
 ```
 
 Cut a release with the short alias:
