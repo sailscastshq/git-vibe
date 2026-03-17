@@ -39,12 +39,18 @@ Open a vibe:
 git vibe code <name>
 ```
 
-Editor launch follows `vibe.openEditor=auto|always|never`. The default is `auto`, which opens VS Code only in interactive terminals. Use `--editor` or `--no-editor` to override that for one run. After opening a vibe, Git Vibe should print enough branch/base/diff context that the worktree feels anchored even when the editor or terminal does not visibly switch for you.
+Workspace launch follows `vibe.openEditor=auto|always|never`. The default is `auto`, which opens a workspace app only in interactive terminals. Use `--editor` or `--no-editor` to override that for one run, and `--codex` or `--vscode` to force the target app. After opening a vibe, Git Vibe should print enough branch/base/diff context that the worktree feels anchored even when the editor or terminal does not visibly switch for you.
 
 Jump back into an existing vibe:
 
 ```bash
 git vibe enter <name>
+```
+
+Reopen an existing vibe in Codex Desktop or VS Code:
+
+```bash
+git vibe open <name>
 ```
 
 Inspect a vibe diff:

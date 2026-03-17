@@ -57,6 +57,12 @@ open_editor_mode() {
   printf '%s\n' "${configured:-auto}"
 }
 
+workspace_app_setting() {
+  local configured
+  configured="$(git_config_get vibe.openWorkspaceWith)"
+  printf '%s\n' "${configured:-auto}"
+}
+
 validate_open_editor_mode() {
   case "$1" in
     auto|always|never)
@@ -81,6 +87,48 @@ should_open_editor() {
       ;;
     auto)
       [[ -t 0 && -t 1 ]]
+      ;;
+  esac
+}
+
+validate_workspace_app() {
+  case "$1" in
+    auto|codex|vscode)
+      ;;
+    *)
+      die "invalid vibe.openWorkspaceWith: $1 (expected auto, codex, or vscode)"
+      ;;
+  esac
+}
+
+in_codex_shell() {
+  [[ "${CODEX_SHELL:-0}" == "1" || "${CODEX_INTERNAL_ORIGINATOR_OVERRIDE:-}" == "Codex Desktop" ]]
+}
+
+resolve_workspace_app() {
+  local requested
+  requested="$1"
+  validate_workspace_app "${requested}"
+
+  case "${requested}" in
+    codex)
+      command -v codex >/dev/null 2>&1 || die "Codex CLI not found; install 'codex' or choose --vscode"
+      printf '%s\n' "codex"
+      ;;
+    vscode)
+      command -v code >/dev/null 2>&1 || die "VS Code CLI 'code' not found; install it or choose --codex"
+      printf '%s\n' "vscode"
+      ;;
+    auto)
+      if in_codex_shell && command -v codex >/dev/null 2>&1; then
+        printf '%s\n' "codex"
+      elif command -v code >/dev/null 2>&1; then
+        printf '%s\n' "vscode"
+      elif command -v codex >/dev/null 2>&1; then
+        printf '%s\n' "codex"
+      else
+        printf '\n'
+      fi
       ;;
   esac
 }
@@ -419,8 +467,9 @@ print_help() {
 Git Vibe
 
 Usage:
-  git vibe code [--editor|--no-editor] <name>
+  git vibe code [--editor|--no-editor] [--codex|--vscode] <name>
   git vibe enter [name]
+  git vibe open [--codex|--vscode] [name]
   git vibe diff [name]
   git vibe finish [--local] [--sync] [name]
   git vibe release <version> [--push]
@@ -435,8 +484,10 @@ Usage:
 
 Examples:
   git vibe code fallback-app-urls
+  git vibe code --codex fallback-app-urls
   git vibe code --no-editor fallback-app-urls
   git vibe enter fallback-app-urls
+  git vibe open fallback-app-urls
   git vibe diff fallback-app-urls
   git vibe finish fallback-app-urls
   git vibe finish --sync fallback-app-urls
@@ -447,32 +498,46 @@ Examples:
 EOF
 }
 
-open_editor_for_path() {
-  local path
+open_workspace_for_path() {
+  local path app
   path="$1"
+  app="$2"
 
-  if ! command -v code >/dev/null 2>&1; then
-    say "Editor: skipped (VS Code CLI 'code' not found)"
-    return 0
-  fi
+  case "${app}" in
+    codex)
+      if codex app "${path}" >/dev/null 2>&1; then
+        say "Workspace: opened in Codex Desktop"
+      else
+        say "Workspace: launch failed (Codex Desktop)"
+      fi
+      ;;
+    vscode)
+      if [[ "${TERM_PROGRAM:-}" == "vscode" ]]; then
+        if code -r "${path}" >/dev/null 2>&1 || code "${path}" >/dev/null 2>&1; then
+          say "Workspace: opened in VS Code"
+        else
+          say "Workspace: launch failed (VS Code)"
+        fi
+        return 0
+      fi
 
-  if [[ "${TERM_PROGRAM:-}" == "vscode" ]]; then
-    code -r "${path}" >/dev/null 2>&1 || code "${path}" >/dev/null 2>&1 || true
-    say "Editor: opened in VS Code"
-    return 0
-  fi
-
-  code "${path}" >/dev/null 2>&1 || true
-  say "Editor: opened in VS Code"
+      if code "${path}" >/dev/null 2>&1; then
+        say "Workspace: opened in VS Code"
+      else
+        say "Workspace: launch failed (VS Code)"
+      fi
+      ;;
+  esac
 }
 
 command_code() {
-  local name slug branch base path shell_output open_editor action base_path editor_mode
+  local name slug branch base path shell_output open_editor action base_path editor_mode workspace_app workspace_app_override
   local -a name_parts
   require_repo
 
   shell_output="false"
   open_editor=""
+  workspace_app_override=""
   name_parts=()
 
   while [[ $# -gt 0 ]]; do
@@ -485,6 +550,12 @@ command_code() {
         ;;
       --no-editor)
         open_editor="never"
+        ;;
+      --codex)
+        workspace_app_override="codex"
+        ;;
+      --vscode)
+        workspace_app_override="vscode"
         ;;
       -h|--help)
         print_help
@@ -547,6 +618,7 @@ command_code() {
   say ""
   say "Next:"
   say "  git vibe enter ${slug}"
+  say "  git vibe open ${slug}"
   say "  git -C ${path} status --short"
   say "  git vibe diff ${slug}"
 
@@ -556,7 +628,16 @@ command_code() {
   fi
 
   if should_open_editor "${editor_mode}"; then
-    open_editor_for_path "${path}"
+    workspace_app="$(workspace_app_setting)"
+    if [[ -n "${workspace_app_override}" ]]; then
+      workspace_app="${workspace_app_override}"
+    fi
+    workspace_app="$(resolve_workspace_app "${workspace_app}")"
+    if [[ -n "${workspace_app}" ]]; then
+      open_workspace_for_path "${path}" "${workspace_app}"
+    else
+      say "Workspace: skipped (no supported app found)"
+    fi
   fi
 
   if [[ "${shell_output}" == "true" ]]; then
@@ -602,6 +683,44 @@ command_enter() {
   if [[ "${shell_output}" == "true" ]]; then
     say_shell_chdir "${path}"
   fi
+}
+
+command_open() {
+  local branch path workspace_app
+  local -a name_parts
+  require_repo
+
+  workspace_app="$(workspace_app_setting)"
+  name_parts=()
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --codex)
+        workspace_app="codex"
+        ;;
+      --vscode)
+        workspace_app="vscode"
+        ;;
+      -h|--help)
+        print_help
+        exit 0
+        ;;
+      *)
+        name_parts+=("$1")
+        ;;
+    esac
+    shift
+  done
+
+  branch="$(resolve_vibe_branch "${name_parts[@]}")"
+  path="$(worktree_path_for_branch "${branch}")"
+  workspace_app="$(resolve_workspace_app "${workspace_app}")"
+  [[ -n "${workspace_app}" ]] || die "no supported workspace app found; install 'code' or 'codex'"
+
+  say "Opening ${branch}"
+  say "Path: ${path}"
+  print_vibe_context "${branch}" "${path}"
+  open_workspace_for_path "${path}" "${workspace_app}"
 }
 
 command_diff() {
@@ -826,7 +945,7 @@ command_list() {
 }
 
 command_status() {
-  local base current prefix root editor_mode branch path
+  local base current prefix root editor_mode workspace_app branch path
   local -a name_parts
   require_repo
 
@@ -849,7 +968,9 @@ command_status() {
   prefix="$(branch_prefix)"
   root="$(vibe_root)"
   editor_mode="$(open_editor_mode)"
+  workspace_app="$(workspace_app_setting)"
   validate_open_editor_mode "${editor_mode}"
+  validate_workspace_app "${workspace_app}"
 
   say "Repo: $(repo_root)"
   say "Base branch: ${base}"
@@ -857,6 +978,7 @@ command_status() {
   say "Branch prefix: ${prefix}"
   say "Vibe root: ${root}"
   say "Open editor: ${editor_mode}"
+  say "Open workspace with: ${workspace_app}"
   say ""
 
   if [[ ${#name_parts[@]} -gt 0 ]]; then
@@ -993,6 +1115,10 @@ main() {
     enter)
       shift
       command_enter "$@"
+      ;;
+    open)
+      shift
+      command_open "$@"
       ;;
     diff)
       shift

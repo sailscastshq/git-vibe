@@ -6,6 +6,7 @@ The command surface is intentionally small:
 
 - `git vibe code <name>`
 - `git vibe enter [name]`
+- `git vibe open [name]`
 - `git vibe diff [name]`
 - `git vibe check [name]`
 - `git vibe finish <name>`
@@ -35,7 +36,7 @@ Git Vibe is also built for AI orchestration. When every `feat/*` branch gets its
 ## What the workflow includes
 
 - A portable `git-vibe` executable exposed as `git vibe ...`
-- `code`, `enter`, `diff`, `finish`, `release`, `ship`, `list`, `status`, `check`, `path`, `prune`, and `version` commands
+- `code`, `enter`, `open`, `diff`, `finish`, `release`, `ship`, `list`, `status`, `check`, `path`, `prune`, and `version` commands
 - Global hook wrappers for `pre-commit`, `commit-msg`, and `pre-push`
 - Semantic commit enforcement
 - Base-branch protection against direct commits and pushes
@@ -78,7 +79,7 @@ The installer:
 - appends `~/.git-vibe/bin` to your shell profile if it is not already managed by Git Vibe
 - installs shell integration so `git vibe code ...` and `git vibe enter ...` move you into the target worktree and `git vibe finish ...` brings you back to the main worktree after cleanup
 
-Editor launch defaults to `auto`, which means Git Vibe opens VS Code only in interactive terminals. You can override that per repo or globally with `vibe.openEditor=auto|always|never`.
+Editor launch defaults to `auto`, which means Git Vibe opens a workspace app only in interactive terminals. You can override that per repo or globally with `vibe.openEditor=auto|always|never`.
 
 If you want the standalone `git-vibe` binary on your shell `PATH`, the installer adds this line to your shell profile:
 
@@ -100,7 +101,7 @@ After your shell profile is loaded, this should also work the way you expect:
 git vibe code fallback-app-urls
 ```
 
-You will land inside the worktree automatically, and in interactive terminals Git Vibe will also open that worktree in VS Code when the `code` CLI is installed. In a VS Code terminal it replaces the current window so Source Control follows the feature worktree instead of staying on the base repo.
+You will land inside the worktree automatically, and in interactive terminals Git Vibe will also open that worktree in your configured workspace app. In a Codex Desktop shell it prefers Codex. Otherwise it prefers VS Code when the `code` CLI is installed. In a VS Code terminal it reuses the current window so Source Control follows the feature worktree instead of staying on the base repo.
 
 If you prefer short aliases, the installer also gives you:
 
@@ -136,6 +137,12 @@ If a tool still looks visually anchored to the base checkout, you can explicitly
 git vibe enter fallback-app-urls
 ```
 
+If you want to reopen the same vibe directly in Codex Desktop or VS Code, use:
+
+```bash
+git vibe open fallback-app-urls
+```
+
 When the feature is merged locally:
 
 ```bash
@@ -163,7 +170,7 @@ git vibe finish --sync fallback-app-urls
 
 ## Commands
 
-### `git vibe code [--editor] [--no-editor] <name>`
+### `git vibe code [--editor] [--no-editor] [--codex|--vscode] <name>`
 
 Creates or reopens a `feat/<slug>` worktree. If the vibe does not exist yet, Git Vibe creates the branch from `main` and opens it. If it already exists, Git Vibe jumps back into that same worktree instead of creating a duplicate.
 
@@ -173,13 +180,13 @@ Example:
 git vibe code add-billing-webhook
 ```
 
-Editor launch follows `vibe.openEditor`, which accepts `auto`, `always`, or `never`.
+Workspace launch follows `vibe.openEditor`, which accepts `auto`, `always`, or `never`.
 
 - `auto` is the default and opens VS Code only in interactive terminals
-- `always` opens VS Code whenever the `code` CLI is available
-- `never` skips editor launch
+- `always` opens your configured workspace app whenever its CLI is available
+- `never` skips workspace launch
 
-Use `--editor` or `--no-editor` to override the config for a single run.
+Use `--editor` or `--no-editor` to override the launch policy for a single run. Use `--codex` or `--vscode` when you want to force a specific app for that one command.
 
 After opening a vibe, Git Vibe prints a context summary with the branch, base, path, compare target, and current change state so you can orient yourself quickly in Codex, VS Code, or a plain terminal.
 
@@ -190,6 +197,14 @@ Jumps back into an existing vibe worktree and prints the same focused context su
 - run it from `main` with a vibe name when you want to reopen a specific lane
 - run it inside a vibe with no name to confirm where you are and re-anchor the current workspace
 - shell integration uses it for an explicit "take me there" flow when `git vibe code ...` was not the command that opened your current terminal
+
+### `git vibe open [--codex|--vscode] [name]`
+
+Reopens an existing vibe in Codex Desktop or VS Code and prints the same focused context summary.
+
+- run it from `main` with a vibe name when the shell is in one place but you want the app to follow the worktree
+- run it inside a vibe with no name to reopen the current lane in your workspace app
+- use `--codex` or `--vscode` to force a target app for one run
 
 ### `git vibe diff [name]`
 
@@ -332,6 +347,15 @@ Editor launch policy:
 git config --global vibe.openEditor auto
 git config vibe.openEditor never
 ```
+
+Workspace app selection:
+
+```bash
+git config --global vibe.openWorkspaceWith auto
+git config vibe.openWorkspaceWith codex
+```
+
+`vibe.openWorkspaceWith=auto` prefers Codex Desktop inside a Codex shell and otherwise uses VS Code when available.
 
 To block raw `main` pushes in a specific repo:
 
