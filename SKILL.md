@@ -46,9 +46,18 @@ git vibe code <number>
 git vibe issue <number>
 ```
 
+Open a pull request from the current vibe:
+
+```bash
+git vibe pr
+git vibe submit
+```
+
 Workspace launch follows `vibe.openEditor=auto|always|never`. The default is `auto`, which opens a workspace app only in interactive terminals. Use `--editor` or `--no-editor` to override that for one run, and `--codex` or `--vscode` to force the target app. After opening a vibe, Git Vibe should print enough branch/base/diff context that the worktree feels anchored even when the editor or terminal does not visibly switch for you.
 
 Issue-driven vibes use `gh issue view` to build deterministic branch names. `vibe.issueBranchStyle=number-and-title|number-only|title-only` controls the naming shape, and Git Vibe remembers the issue-to-branch mapping locally so later issue-title edits do not break reopen flows.
+
+PR-driven handoff uses `gh pr create`, `gh pr view`, and `gh pr checks` so the workflow stays GitHub-native. `git vibe check` should surface PR/check summary when available, and `git vibe checks` should let users inspect the individual checks without leaving the vibe flow.
 
 Jump back into an existing vibe:
 

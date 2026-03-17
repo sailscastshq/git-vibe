@@ -360,6 +360,151 @@ issue_number_for_branch() {
   return 1
 }
 
+titleize_slug() {
+  printf '%s\n' "$1" | tr '-' ' ' | awk '{
+    for (i = 1; i <= NF; i++) {
+      $i = toupper(substr($i, 1, 1)) substr($i, 2)
+    }
+    print
+  }'
+}
+
+strip_semantic_prefix() {
+  printf '%s\n' "$1" | sed -E 's/^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert|release)(\([a-z0-9._/-]+\))?(!)?: //'
+}
+
+recent_commit_subjects_for_branch() {
+  local base branch merge_base
+  branch="$1"
+  base="$(base_branch)"
+  merge_base="$(git merge-base "${base}" "${branch}")"
+  git log --format='%s' "${merge_base}..${branch}" | sed '/^[[:space:]]*$/d'
+}
+
+default_pr_title() {
+  local branch issue_number issue_title first_subject stripped slug
+  branch="$1"
+  issue_number="$(issue_number_for_branch "${branch}" || true)"
+
+  if [[ -n "${issue_number}" ]]; then
+    issue_title="$(issue_title_mapping "${issue_number}")"
+    if [[ -n "${issue_title}" ]]; then
+      printf '%s\n' "${issue_title}"
+      return 0
+    fi
+  fi
+
+  first_subject="$(recent_commit_subjects_for_branch "${branch}" | head -n 1 || true)"
+  if [[ -n "${first_subject}" ]]; then
+    stripped="$(strip_semantic_prefix "${first_subject}")"
+    printf '%s\n' "${stripped:-${first_subject}}"
+    return 0
+  fi
+
+  slug="$(slug_from_branch "${branch}")"
+  printf '%s\n' "$(titleize_slug "${slug}")"
+}
+
+default_pr_body() {
+  local branch issue_number subject stripped emitted
+  branch="$1"
+  issue_number="$(issue_number_for_branch "${branch}" || true)"
+  emitted="false"
+
+  printf '## Summary\n'
+  while IFS= read -r subject; do
+    [[ -n "${subject}" ]] || continue
+    stripped="$(strip_semantic_prefix "${subject}")"
+    printf -- '- %s\n' "${stripped:-${subject}}"
+    emitted="true"
+  done < <(recent_commit_subjects_for_branch "${branch}" | head -n 5)
+
+  if [[ "${emitted}" == "false" ]]; then
+    printf -- '- describe the change\n'
+  fi
+
+  if [[ -n "${issue_number}" ]]; then
+    printf '\nCloses #%s\n' "${issue_number}"
+  fi
+}
+
+ensure_branch_pushed() {
+  local branch path
+  branch="$1"
+
+  git remote get-url origin >/dev/null 2>&1 || die "origin remote is not configured"
+  path="$(find_worktree_for_branch "${branch}" || true)"
+  [[ -n "${path}" ]] || path="$(repo_root)"
+
+  if ! remote_branch_exists "origin/${branch}"; then
+    git -C "${path}" push -u origin "${branch}" >/dev/null || die "could not push ${branch} to origin"
+    return 0
+  fi
+
+  git -C "${path}" branch --set-upstream-to "origin/${branch}" "${branch}" >/dev/null 2>&1 || true
+}
+
+fetch_pr_summary() {
+  local branch
+  branch="$1"
+  command -v gh >/dev/null 2>&1 || return 1
+
+  gh pr view "${branch}" \
+    --json number,title,url,state,isDraft,reviewDecision \
+    --jq '[.number, .title, .url, .state, (if .isDraft then "draft" else "ready" end), (.reviewDecision // "")] | @tsv' \
+    2>/dev/null
+}
+
+fetch_pr_checks_summary() {
+  local branch
+  branch="$1"
+  command -v gh >/dev/null 2>&1 || return 1
+
+  gh pr checks "${branch}" \
+    --json bucket \
+    --jq 'map(.bucket) | if length == 0 then "" else group_by(.) | map("\(.[0]):\(length)") | join(", ") end' \
+    2>/dev/null
+}
+
+fetch_pr_checks_detail() {
+  local branch
+  branch="$1"
+  command -v gh >/dev/null 2>&1 || return 1
+
+  gh pr checks "${branch}" \
+    --json bucket,state,name,link \
+    --jq '.[] | [.bucket, .state, .name, (.link // "")] | @tsv' \
+    2>/dev/null
+}
+
+print_pr_context() {
+  local branch summary checks_summary number title url state draft_state review
+  branch="$1"
+
+  summary="$(fetch_pr_summary "${branch}" || true)"
+  if [[ -z "${summary}" ]]; then
+    say "  PR: none"
+    return 0
+  fi
+
+  IFS=$'\t' read -r number title url state draft_state review <<< "${summary}"
+
+  say "  PR: #${number} ${title}"
+  say "  PR URL: ${url}"
+  if [[ -n "${review}" ]]; then
+    say "  PR State: ${state}, ${draft_state}, review ${review}"
+  else
+    say "  PR State: ${state}, ${draft_state}"
+  fi
+
+  checks_summary="$(fetch_pr_checks_summary "${branch}" || true)"
+  if [[ -n "${checks_summary}" ]]; then
+    say "  Checks: ${checks_summary}"
+  else
+    say "  Checks: none reported"
+  fi
+}
+
 ensure_clean_tree() {
   local path
   path="$1"
@@ -644,6 +789,9 @@ Git Vibe
 Usage:
   git vibe code [--editor|--no-editor] [--codex|--vscode] <name>
   git vibe issue [--editor|--no-editor] [--codex|--vscode] <number>
+  git vibe pr [--draft] [--web] [--title <title>] [--body <body>] [name]
+  git vibe submit [--draft] [--web] [--title <title>] [--body <body>] [name]
+  git vibe checks [name]
   git vibe enter [name]
   git vibe open [--codex|--vscode] [name]
   git vibe diff [name]
@@ -662,6 +810,9 @@ Examples:
   git vibe code fallback-app-urls
   git vibe code 9
   git vibe issue 9
+  git vibe pr
+  git vibe submit 10
+  git vibe checks 10
   git vibe code --codex fallback-app-urls
   git vibe code --no-editor fallback-app-urls
   git vibe enter fallback-app-urls
@@ -880,6 +1031,81 @@ command_issue() {
   command_code "${passthrough[@]}"
 }
 
+command_pr() {
+  local branch base draft web title body pr_title pr_body pr_url
+  local -a name_parts
+  require_repo
+  require_gh
+
+  draft="false"
+  web="false"
+  title=""
+  body=""
+  name_parts=()
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --draft)
+        draft="true"
+        ;;
+      --web)
+        web="true"
+        ;;
+      --title)
+        shift
+        [[ $# -gt 0 ]] || die "--title requires a value"
+        title="$1"
+        ;;
+      --body)
+        shift
+        [[ $# -gt 0 ]] || die "--body requires a value"
+        body="$1"
+        ;;
+      -h|--help)
+        print_help
+        exit 0
+        ;;
+      *)
+        name_parts+=("$1")
+        ;;
+    esac
+    shift
+  done
+
+  branch="$(resolve_vibe_branch "${name_parts[@]}")"
+  base="$(base_branch)"
+  ensure_branch_pushed "${branch}"
+
+  if [[ "${web}" == "true" ]]; then
+    if [[ "${draft}" == "true" ]]; then
+      gh pr create --base "${base}" --head "${branch}" --draft --web
+    else
+      gh pr create --base "${base}" --head "${branch}" --web
+    fi
+    say "Opened PR creation for ${branch}"
+    return 0
+  fi
+
+  pr_title="${title:-$(default_pr_title "${branch}")}"
+  pr_body="${body:-$(default_pr_body "${branch}")}"
+
+  if [[ "${draft}" == "true" ]]; then
+    pr_url="$(gh pr create --base "${base}" --head "${branch}" --draft --title "${pr_title}" --body "${pr_body}")" \
+      || die "could not create a pull request for ${branch}"
+  else
+    pr_url="$(gh pr create --base "${base}" --head "${branch}" --title "${pr_title}" --body "${pr_body}")" \
+      || die "could not create a pull request for ${branch}"
+  fi
+
+  say "Created PR for ${branch}"
+  say "Title: ${pr_title}"
+  say "URL: ${pr_url}"
+}
+
+command_submit() {
+  command_pr "$@"
+}
+
 command_enter() {
   local branch path shell_output
   local -a name_parts
@@ -952,6 +1178,25 @@ command_open() {
   say "Path: ${path}"
   print_vibe_context "${branch}" "${path}"
   open_workspace_for_path "${path}" "${workspace_app}"
+}
+
+command_checks() {
+  local branch checks_output bucket state name link
+  require_repo
+
+  branch="$(resolve_vibe_branch "$@")"
+  checks_output="$(fetch_pr_checks_detail "${branch}" || true)"
+
+  if [[ -z "${checks_output}" ]]; then
+    say "No PR checks found for ${branch}"
+    return 0
+  fi
+
+  say "Checks for ${branch}:"
+  printf '%-10s %-12s %s\n' "BUCKET" "STATE" "NAME"
+  while IFS=$'\t' read -r bucket state name link; do
+    printf '%-10s %-12s %s\n' "${bucket}" "${state}" "${name}"
+  done <<< "${checks_output}"
 }
 
 command_diff() {
@@ -1219,11 +1464,13 @@ command_status() {
     branch="$(resolve_vibe_branch "${name_parts[@]}")"
     path="$(worktree_path_for_branch "${branch}")"
     print_vibe_context "${branch}" "${path}"
+    print_pr_context "${branch}"
     return 0
   fi
 
   if is_vibe_branch "${current}"; then
     print_vibe_context "${current}" "$(repo_root)"
+    print_pr_context "${current}"
     say ""
   fi
 
@@ -1359,6 +1606,18 @@ main() {
     issue)
       shift
       command_issue "$@"
+      ;;
+    pr)
+      shift
+      command_pr "$@"
+      ;;
+    submit)
+      shift
+      command_submit "$@"
+      ;;
+    checks)
+      shift
+      command_checks "$@"
       ;;
     enter)
       shift

@@ -25,6 +25,13 @@ CODE_LOG="${TMP_DIR}/code.log"
 CODEX_LOG="${TMP_DIR}/codex.log"
 ISSUE_9_TITLE_FILE="${TMP_DIR}/issue-9-title.txt"
 ISSUE_10_TITLE_FILE="${TMP_DIR}/issue-10-title.txt"
+PR_NUMBER_FILE="${TMP_DIR}/pr-number.txt"
+PR_URL_FILE="${TMP_DIR}/pr-url.txt"
+PR_TITLE_FILE="${TMP_DIR}/pr-title.txt"
+PR_BODY_FILE="${TMP_DIR}/pr-body.txt"
+PR_HEAD_FILE="${TMP_DIR}/pr-head.txt"
+PR_BASE_FILE="${TMP_DIR}/pr-base.txt"
+PR_DRAFT_FILE="${TMP_DIR}/pr-draft.txt"
 EXPECTED_SHELL_REPO_DIR=""
 EXPECTED_SHELL_WORKTREE_DIR=""
 EXPECTED_WORKTREE_DIR=""
@@ -77,6 +84,105 @@ if [ "\${1:-}" = "issue" ] && [ "\${2:-}" = "view" ]; then
   exit 0
 fi
 
+if [ "\${1:-}" = "pr" ] && [ "\${2:-}" = "create" ]; then
+  shift 2
+  base=""
+  head=""
+  title=""
+  body=""
+  draft="false"
+
+  while [ \$# -gt 0 ]; do
+    case "\$1" in
+      --base)
+        base="\$2"
+        shift 2
+        ;;
+      --head)
+        head="\$2"
+        shift 2
+        ;;
+      --title)
+        title="\$2"
+        shift 2
+        ;;
+      --body)
+        body="\$2"
+        shift 2
+        ;;
+      --draft)
+        draft="true"
+        shift
+        ;;
+      --web)
+        shift
+        ;;
+      *)
+        shift
+        ;;
+    esac
+  done
+
+  printf '%s\n' "\$base" > "${PR_BASE_FILE}"
+  printf '%s\n' "\$head" > "${PR_HEAD_FILE}"
+  printf '%s\n' "\$title" > "${PR_TITLE_FILE}"
+  printf '%s\n' "\$body" > "${PR_BODY_FILE}"
+  printf '%s\n' "\$draft" > "${PR_DRAFT_FILE}"
+  printf '%s\n' "\$(<"${PR_URL_FILE}")"
+  exit 0
+fi
+
+if [ "\${1:-}" = "pr" ] && [ "\${2:-}" = "view" ]; then
+  target="\${3:-}"
+  [ -f "${PR_HEAD_FILE}" ] || exit 1
+  [ "\$target" = "\$(<"${PR_HEAD_FILE}")" ] || exit 1
+
+  draft_state="ready"
+  if [ "\$(<"${PR_DRAFT_FILE}")" = "true" ]; then
+    draft_state="draft"
+  fi
+
+  printf '%s\t%s\t%s\tOPEN\t%s\tREVIEW_REQUIRED\n' \
+    "\$(<"${PR_NUMBER_FILE}")" \
+    "\$(<"${PR_TITLE_FILE}")" \
+    "\$(<"${PR_URL_FILE}")" \
+    "\$draft_state"
+  exit 0
+fi
+
+if [ "\${1:-}" = "pr" ] && [ "\${2:-}" = "checks" ]; then
+  target="\${3:-}"
+  [ -f "${PR_HEAD_FILE}" ] || exit 1
+  [ "\$target" = "\$(<"${PR_HEAD_FILE}")" ] || exit 1
+
+  json_fields=""
+  shift 3
+  while [ \$# -gt 0 ]; do
+    case "\$1" in
+      --json)
+        json_fields="\$2"
+        shift 2
+        ;;
+      *)
+        shift
+        ;;
+    esac
+  done
+
+  if [ "\$json_fields" = "bucket" ]; then
+    printf 'pass:1, pending:1\n'
+    exit 0
+  fi
+
+  if [ "\$json_fields" = "bucket,state,name,link" ]; then
+    printf 'pass\tsuccess\tunit\thttps://example.com/unit\n'
+    printf 'pending\tpending\tlint\thttps://example.com/lint\n'
+    exit 0
+  fi
+
+  exit 1
+fi
+
 printf 'fake gh: unsupported args: %s\n' "\$*" >&2
 exit 1
 EOF
@@ -84,6 +190,8 @@ chmod +x "${FAKE_BIN_DIR}/gh"
 
 printf 'Issue aware vibe creation\n' > "${ISSUE_9_TITLE_FILE}"
 printf 'Issue title only branch\n' > "${ISSUE_10_TITLE_FILE}"
+printf '24\n' > "${PR_NUMBER_FILE}"
+printf 'https://github.com/sailscastshq/git-vibe/pull/24\n' > "${PR_URL_FILE}"
 
 mkdir -p "${HOOKS_DIR}"
 for hook in pre-commit commit-msg pre-push; do
@@ -208,6 +316,32 @@ ISSUE_CHECK_OUTPUT="$(
 printf '\nIssue change\n' >> "${ISSUE_WORKTREE_DIR}/README.md"
 git -C "${ISSUE_WORKTREE_DIR}" add README.md
 git -C "${ISSUE_WORKTREE_DIR}" commit -m "feat: update readme from issue vibe" >/dev/null
+
+ISSUE_PR_OUTPUT="$(
+  cd "${REPO_DIR}" >/dev/null
+  PATH="${FAKE_BIN_DIR}:$PATH" "${ROOT}/bin/git-vibe" pr 9
+)"
+[[ "${ISSUE_PR_OUTPUT}" == *"Created PR for feat/9-issue-aware-vibe-creation"* ]] || fail "pr did not create a PR for the issue vibe"
+[[ "$(cat "${PR_HEAD_FILE}")" == "feat/9-issue-aware-vibe-creation" ]] || fail "pr did not use the issue vibe branch as the PR head"
+[[ "$(cat "${PR_BASE_FILE}")" == "main" ]] || fail "pr did not use the base branch"
+[[ "$(cat "${PR_TITLE_FILE}")" == "Issue aware vibe creation" ]] || fail "pr did not use the issue title as the PR title"
+[[ "$(<"${PR_BODY_FILE}")" == *"- update readme from issue vibe"* ]] || fail "pr did not summarize the recent commits in the PR body"
+[[ "$(<"${PR_BODY_FILE}")" == *"Closes #9"* ]] || fail "pr did not link the issue in the PR body"
+git --git-dir="${ORIGIN_DIR}" show-ref --verify --quiet refs/heads/feat/9-issue-aware-vibe-creation || fail "pr did not push the feature branch to origin"
+
+ISSUE_PR_STATUS_OUTPUT="$(
+  cd "${REPO_DIR}" >/dev/null
+  PATH="${FAKE_BIN_DIR}:$PATH" "${ROOT}/bin/git-vibe" check 9
+)"
+[[ "${ISSUE_PR_STATUS_OUTPUT}" == *"PR: #24 Issue aware vibe creation"* ]] || fail "check did not show the linked PR"
+[[ "${ISSUE_PR_STATUS_OUTPUT}" == *"Checks: pass:1, pending:1"* ]] || fail "check did not summarize the PR checks"
+
+ISSUE_PR_CHECKS_OUTPUT="$(
+  cd "${REPO_DIR}" >/dev/null
+  PATH="${FAKE_BIN_DIR}:$PATH" "${ROOT}/bin/git-vibe" checks 9
+)"
+[[ "${ISSUE_PR_CHECKS_OUTPUT}" == *"Checks for feat/9-issue-aware-vibe-creation"* ]] || fail "checks did not target the issue vibe branch"
+[[ "${ISSUE_PR_CHECKS_OUTPUT}" == *"unit"* ]] || fail "checks did not print the expected check rows"
 
 (
   cd "${REPO_DIR}" >/dev/null

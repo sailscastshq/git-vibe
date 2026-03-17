@@ -6,10 +6,13 @@ The command surface is intentionally small:
 
 - `git vibe code <name>`
 - `git vibe issue <number>`
+- `git vibe pr`
+- `git vibe submit`
 - `git vibe enter [name]`
 - `git vibe open [name]`
 - `git vibe diff [name]`
 - `git vibe check [name]`
+- `git vibe checks [name]`
 - `git vibe finish <name>`
 - `git vibe release <version>`
 - `git vibe ship <version>`
@@ -37,7 +40,7 @@ Git Vibe is also built for AI orchestration. When every `feat/*` branch gets its
 ## What the workflow includes
 
 - A portable `git-vibe` executable exposed as `git vibe ...`
-- `code`, `issue`, `enter`, `open`, `diff`, `finish`, `release`, `ship`, `list`, `status`, `check`, `path`, `prune`, and `version` commands
+- `code`, `issue`, `pr`, `submit`, `enter`, `open`, `diff`, `finish`, `release`, `ship`, `list`, `status`, `check`, `checks`, `path`, `prune`, and `version` commands
 - Global hook wrappers for `pre-commit`, `commit-msg`, and `pre-push`
 - Semantic commit enforcement
 - Base-branch protection against direct commits and pushes
@@ -118,6 +121,13 @@ git vibe code 9
 git vibe issue 9
 ```
 
+After you’ve made the change, Git Vibe can also open the PR for you:
+
+```bash
+git vibe pr
+git vibe submit
+```
+
 ## Workflow
 
 Start a vibe from a clean `main` checkout:
@@ -178,6 +188,16 @@ Or let Git Vibe fetch before it checks:
 git vibe finish --sync fallback-app-urls
 ```
 
+The preferred GitHub-native loop is now:
+
+```bash
+git vibe issue 9
+git commit -m "feat: implement the change"
+git vibe pr
+git vibe check
+git vibe finish --sync 9
+```
+
 ## Commands
 
 ### `git vibe code [--editor] [--no-editor] [--codex|--vscode] <name|number>`
@@ -213,6 +233,19 @@ Explicit issue-first alias for `git vibe code <number>`.
 - use this when you want the CLI to read clearly as “start work from issue 9”
 - Git Vibe requires `gh` only when it needs to fetch issue metadata for a new issue-driven vibe
 - once the vibe exists, Git Vibe can reopen it by issue number from the stored branch mapping
+
+### `git vibe pr [--draft] [--web] [--title <title>] [--body <body>] [name]`
+
+Creates a pull request for the current vibe, or for the named vibe when run from `main`.
+
+- pushes the vibe branch to `origin` first when needed
+- uses the linked issue title as the default PR title when the vibe came from an issue
+- builds a default PR body from recent commit subjects and adds `Closes #<issue>` for issue-linked vibes
+- keeps `gh` as the underlying engine so the actual PR still lives in normal GitHub workflows
+
+### `git vibe submit [--draft] [--web] [--title <title>] [--body <body>] [name]`
+
+Alias for `git vibe pr`.
 
 ### `git vibe enter [name]`
 
@@ -287,11 +320,15 @@ Lists active feature worktrees for the current repository.
 
 ### `git vibe status [name]`
 
-Shows the current repository, base branch, branch prefix, worktree root, and active vibes. When run inside a vibe worktree, or when you pass a vibe name, it also prints a focused workspace summary for that vibe.
+Shows the current repository, base branch, branch prefix, worktree root, and active vibes. When run inside a vibe worktree, or when you pass a vibe name, it also prints a focused workspace summary for that vibe, including linked PR state and a checks summary when available through `gh`.
 
 ### `git vibe check [name]`
 
 Alias for `git vibe status [name]`.
+
+### `git vibe checks [name]`
+
+Shows the individual GitHub checks for the current vibe, or for the named vibe when run from `main`.
 
 ### `git vibe path <name>`
 
