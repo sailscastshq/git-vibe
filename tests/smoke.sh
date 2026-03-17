@@ -20,6 +20,7 @@ FAKE_BIN_DIR="${TMP_DIR}/fake-bin"
 CODE_LOG="${TMP_DIR}/code.log"
 EXPECTED_SHELL_REPO_DIR=""
 EXPECTED_SHELL_WORKTREE_DIR=""
+EXPECTED_WORKTREE_DIR=""
 
 cleanup() {
   rm -rf "${TMP_DIR}"
@@ -70,6 +71,7 @@ SMOKE_CODE_OUTPUT="$(
   "${ROOT}/bin/git-vibe" code smoke-test
 )"
 [[ -d "${WORKTREE_DIR}" ]] || fail "worktree was not created"
+EXPECTED_WORKTREE_DIR="$(cd "${WORKTREE_DIR}" && pwd -P)"
 [[ "${SMOKE_CODE_OUTPUT}" == *"Compare: main...feat/smoke-test"* ]] || fail "code did not print the expected compare context"
 [[ "${SMOKE_CODE_OUTPUT}" == *"Changes vs main: none"* ]] || fail "code did not print the expected clean summary"
 
@@ -88,6 +90,13 @@ SMOKE_CHECK_OUTPUT="$(
 )"
 [[ "${SMOKE_CHECK_OUTPUT}" == *"Branch: feat/smoke-test"* ]] || fail "check did not show the vibe branch context"
 [[ "${SMOKE_CHECK_OUTPUT}" == *"Compare: main...feat/smoke-test"* ]] || fail "check did not show the expected compare target"
+
+SMOKE_ENTER_OUTPUT="$(
+  cd "${REPO_DIR}" >/dev/null
+  "${ROOT}/bin/git-vibe" enter smoke-test --shell-output
+)"
+[[ "${SMOKE_ENTER_OUTPUT}" == *"Entering feat/smoke-test"* ]] || fail "enter did not announce the vibe it reopened"
+[[ "${SMOKE_ENTER_OUTPUT}" == *"__GIT_VIBE_CHDIR__=${EXPECTED_WORKTREE_DIR}"* ]] || fail "enter did not emit the expected shell jump marker"
 
 git -C "${WORKTREE_DIR}" commit -m "feat: update readme" >/dev/null
 
@@ -246,6 +255,15 @@ AUTO_CD_OUTPUT="$(HOME="${INSTALL_HOME}" SHELL=/bin/bash bash -lc '
 EXPECTED_SHELL_WORKTREE_DIR="$(cd "${SHELL_WORKTREE_DIR}" && pwd -P)"
 
 [[ "${AUTO_CD_OUTPUT}" == "${EXPECTED_SHELL_WORKTREE_DIR}" ]] || fail "shell integration did not move into the new worktree"
+
+ENTER_OUTPUT="$(HOME="${INSTALL_HOME}" SHELL=/bin/bash bash -lc '
+  source ~/.bashrc
+  cd "'"${SHELL_REPO_DIR}"'"
+  git vibe enter shell-jump >/dev/null
+  pwd -P
+')"
+
+[[ "${ENTER_OUTPUT}" == "${EXPECTED_SHELL_WORKTREE_DIR}" ]] || fail "shell integration did not move into the existing worktree after enter"
 
 FINISH_OUTPUT="$(HOME="${INSTALL_HOME}" SHELL=/bin/bash bash -lc '
   source ~/.bashrc

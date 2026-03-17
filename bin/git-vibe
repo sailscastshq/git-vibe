@@ -420,6 +420,7 @@ Git Vibe
 
 Usage:
   git vibe code [--editor|--no-editor] <name>
+  git vibe enter [name]
   git vibe diff [name]
   git vibe finish [--local] [--sync] [name]
   git vibe release <version> [--push]
@@ -435,6 +436,7 @@ Usage:
 Examples:
   git vibe code fallback-app-urls
   git vibe code --no-editor fallback-app-urls
+  git vibe enter fallback-app-urls
   git vibe diff fallback-app-urls
   git vibe finish fallback-app-urls
   git vibe finish --sync fallback-app-urls
@@ -544,6 +546,7 @@ command_code() {
   print_vibe_context "${branch}" "${path}"
   say ""
   say "Next:"
+  say "  git vibe enter ${slug}"
   say "  git -C ${path} status --short"
   say "  git vibe diff ${slug}"
 
@@ -563,6 +566,42 @@ command_code() {
 
 command_start() {
   command_code --no-editor "$@"
+}
+
+command_enter() {
+  local branch path shell_output
+  local -a name_parts
+  require_repo
+
+  shell_output="false"
+  name_parts=()
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --shell-output)
+        shell_output="true"
+        ;;
+      -h|--help)
+        print_help
+        exit 0
+        ;;
+      *)
+        name_parts+=("$1")
+        ;;
+    esac
+    shift
+  done
+
+  branch="$(resolve_vibe_branch "${name_parts[@]}")"
+  path="$(worktree_path_for_branch "${branch}")"
+
+  say "Entering ${branch}"
+  say "Path: ${path}"
+  print_vibe_context "${branch}" "${path}"
+
+  if [[ "${shell_output}" == "true" ]]; then
+    say_shell_chdir "${path}"
+  fi
 }
 
 command_diff() {
@@ -950,6 +989,10 @@ main() {
     code)
       shift
       command_code "$@"
+      ;;
+    enter)
+      shift
+      command_enter "$@"
       ;;
     diff)
       shift

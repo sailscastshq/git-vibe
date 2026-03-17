@@ -5,6 +5,7 @@ Git Vibe is a lightweight Git workflow for teams that ship from `main`, keep all
 The command surface is intentionally small:
 
 - `git vibe code <name>`
+- `git vibe enter [name]`
 - `git vibe diff [name]`
 - `git vibe check [name]`
 - `git vibe finish <name>`
@@ -34,7 +35,7 @@ Git Vibe is also built for AI orchestration. When every `feat/*` branch gets its
 ## What the workflow includes
 
 - A portable `git-vibe` executable exposed as `git vibe ...`
-- `code`, `diff`, `finish`, `release`, `ship`, `list`, `status`, `check`, `path`, `prune`, and `version` commands
+- `code`, `enter`, `diff`, `finish`, `release`, `ship`, `list`, `status`, `check`, `path`, `prune`, and `version` commands
 - Global hook wrappers for `pre-commit`, `commit-msg`, and `pre-push`
 - Semantic commit enforcement
 - Base-branch protection against direct commits and pushes
@@ -75,7 +76,7 @@ The installer:
   - `vibe.branchPrefix=feat/`
   - `vibe.worktreeRoot=../.vibe`
 - appends `~/.git-vibe/bin` to your shell profile if it is not already managed by Git Vibe
-- installs shell integration so `git vibe code ...` moves you into the new worktree and `git vibe finish ...` brings you back to the main worktree after cleanup
+- installs shell integration so `git vibe code ...` and `git vibe enter ...` move you into the target worktree and `git vibe finish ...` brings you back to the main worktree after cleanup
 
 Editor launch defaults to `auto`, which means Git Vibe opens VS Code only in interactive terminals. You can override that per repo or globally with `vibe.openEditor=auto|always|never`.
 
@@ -129,6 +130,12 @@ If you rerun `git vibe code fallback-app-urls`, Git Vibe reopens the existing wo
 
 When it opens or reopens a vibe, Git Vibe also prints a short workspace summary with the branch, base, path, compare target, and current change state. That makes the worktree feel anchored even in tools that do not visibly switch context for you.
 
+If a tool still looks visually anchored to the base checkout, you can explicitly jump back into a vibe later with:
+
+```bash
+git vibe enter fallback-app-urls
+```
+
 When the feature is merged locally:
 
 ```bash
@@ -175,6 +182,14 @@ Editor launch follows `vibe.openEditor`, which accepts `auto`, `always`, or `nev
 Use `--editor` or `--no-editor` to override the config for a single run.
 
 After opening a vibe, Git Vibe prints a context summary with the branch, base, path, compare target, and current change state so you can orient yourself quickly in Codex, VS Code, or a plain terminal.
+
+### `git vibe enter [name]`
+
+Jumps back into an existing vibe worktree and prints the same focused context summary.
+
+- run it from `main` with a vibe name when you want to reopen a specific lane
+- run it inside a vibe with no name to confirm where you are and re-anchor the current workspace
+- shell integration uses it for an explicit "take me there" flow when `git vibe code ...` was not the command that opened your current terminal
 
 ### `git vibe diff [name]`
 

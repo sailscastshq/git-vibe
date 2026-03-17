@@ -41,6 +41,12 @@ git vibe code <name>
 
 Editor launch follows `vibe.openEditor=auto|always|never`. The default is `auto`, which opens VS Code only in interactive terminals. Use `--editor` or `--no-editor` to override that for one run. After opening a vibe, Git Vibe should print enough branch/base/diff context that the worktree feels anchored even when the editor or terminal does not visibly switch for you.
 
+Jump back into an existing vibe:
+
+```bash
+git vibe enter <name>
+```
+
 Inspect a vibe diff:
 
 ```bash
@@ -192,4 +198,4 @@ The installer does two important things:
 
 - sets global Git aliases so `git vibe ...`, `git vc ...`, and `git vr ...` work immediately
 - appends `~/.git-vibe/bin` to the shell profile so `git-vibe ...` works in future terminals
-- installs shell integration so `git vibe code ...`, `git vibe finish ...`, and `git vc ...` can move between worktrees automatically
+- installs shell integration so `git vibe code ...`, `git vibe enter ...`, `git vibe finish ...`, and `git vc ...` can move between worktrees automatically
