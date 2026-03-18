@@ -212,10 +212,17 @@ The release command creates `chore(release): vX.Y.Z` on `main`, adds the annotat
 - `git vibe finish <name>` is the default auto mode. It checks whether the vibe is already merged into local `main` or your current `origin/main` refs, then cleans up if it is.
 - `git vibe finish --sync <name>` fetches `origin/main` first, then runs the same merge check. Use this after a PR was merged on GitHub and your local refs may be stale.
 - `git vibe finish --local <name>` merges the vibe into local `main` with `--ff-only`, then cleans up.
+- `git vibe finish --delete-remote <name>` also deletes `origin/<branch>` after merge verification. If `vibe.deleteRemoteOnFinish=true`, that remote cleanup becomes the repo default unless the user passes `--keep-remote`.
 
 Keep `auto` as the default. It works offline, it does not force a network call, and it does not silently merge into `main`. Use `--sync` when you want fresh remote knowledge and `--local` when you want Git Vibe to perform the merge itself.
 
 Use `git vibe finish` when the branch lifecycle is complete. Use `git vibe doctor` when the branch is still active but the worktree metadata looks stale, missing, prunable, or otherwise unhealthy. Use raw `git vibe prune` as the lower-level cleanup command when you already know you just want to drop stale metadata.
+
+Remote cleanup should stay safe and boring:
+
+- deleting a remote feature branch should only happen after merge verification succeeds
+- an already deleted remote branch should be treated as a successful no-op
+- `git vibe status` should show whether `vibe.deleteRemoteOnFinish` is enabled for the repo
 
 ## Install
 

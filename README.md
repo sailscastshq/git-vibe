@@ -279,7 +279,7 @@ Shows the current vibe's cumulative diff against its base branch.
 - pass a vibe name from `main` when you want to inspect another active worktree
 - untracked files are called out explicitly so they do not disappear from the mental model
 
-### `git vibe finish [--local] [--sync] [name]`
+### `git vibe finish [--local] [--sync] [--delete-remote|--keep-remote] [name]`
 
 Finishes a vibe safely.
 
@@ -288,10 +288,20 @@ Finishes a vibe safely.
 - If the branch is merged into `origin/main`, it fast-forwards local `main`, then cleans up.
 - If you pass `--local`, it merges the branch into local `main` with `--ff-only`, then cleans up.
 - If you pass `--sync`, it fetches `origin/main` first, then runs the same cleanup check with fresh remote refs.
+- If you pass `--delete-remote`, Git Vibe also deletes `origin/<branch>` after merge verification and before local cleanup.
+- If you pass `--keep-remote`, it skips remote deletion even when the repo config would normally do it.
 
 Run it with no name from inside a feature worktree to finish the current vibe.
 
 Use `finish` when the branch lifecycle is complete. Use `doctor` or `prune` when the branch is still open but the worktree metadata got out of sync.
+
+If you want remote cleanup to happen by default in this repo, set:
+
+```bash
+git config vibe.deleteRemoteOnFinish true
+```
+
+Git Vibe treats an already deleted remote branch as a successful no-op, so the finish flow still completes cleanly when GitHub or another maintainer already removed it.
 
 ### `git vibe release <version> [--push]`
 
