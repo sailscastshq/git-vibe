@@ -10,6 +10,8 @@ WORKTREE_DIR="${TMP_DIR}/.vibe/demo/smoke-test"
 WORKTREE_FINISH_DIR="${TMP_DIR}/.vibe/demo/worktree-finish"
 ISSUE_WORKTREE_DIR="${TMP_DIR}/.vibe/demo/9-issue-aware-vibe-creation"
 TITLE_ONLY_ISSUE_WORKTREE_DIR="${TMP_DIR}/.vibe/demo/issue-title-only-branch"
+DOCTOR_DIRTY_WORKTREE_DIR="${TMP_DIR}/.vibe/demo/doctor-dirty"
+DOCTOR_STALE_WORKTREE_DIR="${TMP_DIR}/.vibe/demo/doctor-stale"
 AUTO_EDITOR_WORKTREE_DIR="${TMP_DIR}/.vibe/demo/auto-editor"
 ALWAYS_EDITOR_WORKTREE_DIR="${TMP_DIR}/.vibe/demo/always-editor"
 NEVER_EDITOR_WORKTREE_DIR="${TMP_DIR}/.vibe/demo/never-editor"
@@ -36,6 +38,7 @@ EXPECTED_SHELL_REPO_DIR=""
 EXPECTED_SHELL_WORKTREE_DIR=""
 EXPECTED_WORKTREE_DIR=""
 EXPECTED_CODEX_AUTO_WORKTREE_DIR=""
+EXPECTED_VIBE_ROOT_DIR=""
 
 cleanup() {
   rm -rf "${TMP_DIR}"
@@ -225,6 +228,7 @@ SMOKE_CODE_OUTPUT="$(
 )"
 [[ -d "${WORKTREE_DIR}" ]] || fail "worktree was not created"
 EXPECTED_WORKTREE_DIR="$(cd "${WORKTREE_DIR}" && pwd -P)"
+EXPECTED_VIBE_ROOT_DIR="$(cd "${TMP_DIR}/.vibe" && pwd -P)/demo"
 [[ "${SMOKE_CODE_OUTPUT}" == *"Compare: main...feat/smoke-test"* ]] || fail "code did not print the expected compare context"
 [[ "${SMOKE_CODE_OUTPUT}" == *"Changes vs main: none"* ]] || fail "code did not print the expected clean summary"
 
@@ -243,6 +247,13 @@ SMOKE_CHECK_OUTPUT="$(
 )"
 [[ "${SMOKE_CHECK_OUTPUT}" == *"Branch: feat/smoke-test"* ]] || fail "check did not show the vibe branch context"
 [[ "${SMOKE_CHECK_OUTPUT}" == *"Compare: main...feat/smoke-test"* ]] || fail "check did not show the expected compare target"
+
+SMOKE_CHECK_IN_VIBE_OUTPUT="$(
+  cd "${WORKTREE_DIR}" >/dev/null
+  "${ROOT}/bin/git-vibe" check
+)"
+[[ "${SMOKE_CHECK_IN_VIBE_OUTPUT}" != *"mkdir:"* ]] || fail "check printed a worktree root mkdir warning inside the vibe"
+[[ "${SMOKE_CHECK_IN_VIBE_OUTPUT}" == *"Vibe root: ${EXPECTED_VIBE_ROOT_DIR}"* ]] || fail "check did not keep the shared vibe root when run inside the vibe"
 
 SMOKE_ENTER_OUTPUT="$(
   cd "${REPO_DIR}" >/dev/null
@@ -368,6 +379,53 @@ git -C "${REPO_DIR}" branch -d feat/issue-title-only-branch >/dev/null
 git -C "${REPO_DIR}" config --unset vibe.issueBranchStyle
 
 printf 'smoke: issue flow ok\n'
+
+(
+  cd "${REPO_DIR}" >/dev/null
+  "${ROOT}/bin/git-vibe" code doctor-dirty >/dev/null
+)
+[[ -d "${DOCTOR_DIRTY_WORKTREE_DIR}" ]] || fail "doctor dirty worktree was not created"
+
+printf '\nDoctor dirty change\n' >> "${DOCTOR_DIRTY_WORKTREE_DIR}/README.md"
+
+DOCTOR_LIST_OUTPUT="$(
+  cd "${REPO_DIR}" >/dev/null
+  "${ROOT}/bin/git-vibe" list
+)"
+[[ "${DOCTOR_LIST_OUTPUT}" == *"STATE"* ]] || fail "list did not print the richer status header"
+[[ "${DOCTOR_LIST_OUTPUT}" == *"feat/doctor-dirty"* ]] || fail "list did not include the doctor dirty vibe"
+[[ "${DOCTOR_LIST_OUTPUT}" == *"dirty:1"* ]] || fail "list did not report the dirty vibe state"
+[[ "${DOCTOR_LIST_OUTPUT}" == *"Doctor dirty change"* || "${DOCTOR_LIST_OUTPUT}" == *"1 file changed"* || "${DOCTOR_LIST_OUTPUT}" == *"1 insertion(+)"* ]] || fail "list did not summarize the dirty vibe changes"
+
+(
+  cd "${REPO_DIR}" >/dev/null
+  "${ROOT}/bin/git-vibe" code doctor-stale >/dev/null
+)
+[[ -d "${DOCTOR_STALE_WORKTREE_DIR}" ]] || fail "doctor stale worktree was not created"
+rm -rf "${DOCTOR_STALE_WORKTREE_DIR}"
+
+DOCTOR_OUTPUT="$(
+  cd "${REPO_DIR}" >/dev/null
+  "${ROOT}/bin/git-vibe" doctor
+)"
+[[ "${DOCTOR_OUTPUT}" == *"Doctor findings:"* ]] || fail "doctor did not report stale worktree metadata"
+[[ "${DOCTOR_OUTPUT}" == *"feat/doctor-stale"* ]] || fail "doctor did not identify the stale vibe branch"
+[[ "${DOCTOR_OUTPUT}" == *"prunable"* || "${DOCTOR_OUTPUT}" == *"missing"* ]] || fail "doctor did not label the stale worktree state"
+
+DOCTOR_REPAIR_OUTPUT="$(
+  cd "${REPO_DIR}" >/dev/null
+  "${ROOT}/bin/git-vibe" doctor --repair
+)"
+[[ "${DOCTOR_REPAIR_OUTPUT}" == *"Doctor: no remaining worktree problems"* ]] || fail "doctor --repair did not clear the stale worktree metadata"
+if git -C "${REPO_DIR}" worktree list --porcelain | grep -q 'feat/doctor-stale'; then
+  fail "doctor --repair did not prune the stale worktree entry"
+fi
+
+git -C "${REPO_DIR}" worktree remove --force "${DOCTOR_DIRTY_WORKTREE_DIR}" >/dev/null
+git -C "${REPO_DIR}" branch -D feat/doctor-dirty >/dev/null
+git -C "${REPO_DIR}" branch -D feat/doctor-stale >/dev/null
+
+printf 'smoke: doctor flow ok\n'
 
 git -C "${REPO_DIR}" config vibe.openEditor auto
 : > "${CODE_LOG}"
