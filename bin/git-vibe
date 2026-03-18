@@ -31,8 +31,22 @@ repo_root() {
   git rev-parse --path-format=absolute --show-toplevel
 }
 
+primary_repo_root() {
+  local common_dir
+  common_dir="$(git rev-parse --path-format=absolute --git-common-dir)"
+
+  case "${common_dir}" in
+    */.git)
+      dirname "${common_dir}"
+      ;;
+    *)
+      repo_root
+      ;;
+  esac
+}
+
 repo_name() {
-  basename "$(repo_root)"
+  basename "$(primary_repo_root)"
 }
 
 git_config_get() {
@@ -181,7 +195,7 @@ slugify() {
 
 worktree_root() {
   local root repo
-  repo="$(repo_root)"
+  repo="$(primary_repo_root)"
   root="$(worktree_root_setting)"
 
   if [[ "${root}" = /* ]]; then
@@ -577,11 +591,17 @@ find_worktree_for_branch() {
   return 1
 }
 
-list_vibes_raw() {
-  local prefix path branch line
-  prefix="$(branch_prefix)"
+worktree_records_raw() {
+  local path branch head detached bare locked prunable locked_reason prunable_reason line
   path=""
   branch=""
+  head=""
+  detached="false"
+  bare="false"
+  locked="false"
+  prunable="false"
+  locked_reason=""
+  prunable_reason=""
 
   while IFS= read -r line; do
     case "${line}" in
@@ -591,15 +611,76 @@ list_vibes_raw() {
       branch\ refs/heads/*)
         branch="${line#branch refs/heads/}"
         ;;
+      HEAD\ *)
+        head="${line#HEAD }"
+        ;;
+      detached)
+        detached="true"
+        ;;
+      bare)
+        bare="true"
+        ;;
+      locked\ *)
+        locked="true"
+        locked_reason="${line#locked }"
+        ;;
+      locked)
+        locked="true"
+        locked_reason=""
+        ;;
+      prunable\ *)
+        prunable="true"
+        prunable_reason="${line#prunable }"
+        ;;
+      prunable)
+        prunable="true"
+        prunable_reason=""
+        ;;
       "")
-        if [[ -n "${branch}" && "${branch}" == "${prefix}"* ]]; then
-          printf '%s\t%s\n' "${branch}" "${path}"
+        if [[ -n "${path}" ]]; then
+          printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+            "${branch}" \
+            "${path}" \
+            "${head}" \
+            "${detached}" \
+            "${bare}" \
+            "${locked}" \
+            "${locked_reason}" \
+            "${prunable}" \
+            "${prunable_reason}"
         fi
         path=""
         branch=""
+        head=""
+        detached="false"
+        bare="false"
+        locked="false"
+        prunable="false"
+        locked_reason=""
+        prunable_reason=""
         ;;
     esac
   done < <(git worktree list --porcelain; printf '\n')
+}
+
+list_vibes_raw() {
+  local prefix branch path head detached bare locked locked_reason prunable prunable_reason
+  prefix="$(branch_prefix)"
+
+  while IFS=$'\t' read -r branch path head detached bare locked locked_reason prunable prunable_reason; do
+    if [[ -n "${branch}" && "${branch}" == "${prefix}"* ]]; then
+      printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "${branch}" \
+        "${path}" \
+        "${head}" \
+        "${detached}" \
+        "${bare}" \
+        "${locked}" \
+        "${locked_reason}" \
+        "${prunable}" \
+        "${prunable_reason}"
+    fi
+  done < <(worktree_records_raw)
 }
 
 is_vibe_branch() {
@@ -651,30 +732,133 @@ worktree_path_for_branch() {
   die "worktree not found for ${branch}"
 }
 
+worktree_path_exists() {
+  local path
+  path="$1"
+  [[ -d "${path}" ]]
+}
+
+accessible_worktree_path() {
+  local path
+  path="$1"
+  worktree_path_exists "${path}" && git -C "${path}" rev-parse --is-inside-work-tree >/dev/null 2>&1
+}
+
 vibe_merge_base() {
-  local base path
+  local base path branch
   base="$1"
   path="$2"
-  git -C "${path}" merge-base "${base}" HEAD
+  branch="${3:-}"
+
+  if accessible_worktree_path "${path}"; then
+    git -C "${path}" merge-base "${base}" HEAD
+    return 0
+  fi
+
+  if [[ -n "${branch}" ]]; then
+    git merge-base "${base}" "${branch}"
+    return 0
+  fi
+
+  return 1
 }
 
 vibe_diff_shortstat() {
   local merge_base path
   merge_base="$1"
   path="$2"
+
+  accessible_worktree_path "${path}" || return 0
+  [[ -n "${merge_base}" ]] || return 0
   git -C "${path}" diff --shortstat "${merge_base}" || true
 }
 
 vibe_dirty_count() {
   local path
   path="$1"
+
+  accessible_worktree_path "${path}" || {
+    printf '%s\n' "-"
+    return 0
+  }
+
   git -C "${path}" status --porcelain | wc -l | tr -d ' '
 }
 
 vibe_untracked_files() {
   local path
   path="$1"
+
+  accessible_worktree_path "${path}" || return 0
   git -C "${path}" ls-files --others --exclude-standard
+}
+
+vibe_ahead_behind_summary() {
+  local base branch behind ahead
+  base="$1"
+  branch="$2"
+  read -r behind ahead < <(git rev-list --left-right --count "${base}...${branch}" 2>/dev/null || printf '0 0\n')
+  printf '+%s/-%s\n' "${ahead:-0}" "${behind:-0}"
+}
+
+worktree_state_label() {
+  local path locked prunable dirty_count
+  local -a labels
+  path="$1"
+  locked="$2"
+  prunable="$3"
+  labels=()
+
+  if [[ "${prunable}" == "true" ]]; then
+    labels+=("prunable")
+  elif ! accessible_worktree_path "${path}"; then
+    labels+=("missing")
+  else
+    dirty_count="$(vibe_dirty_count "${path}")"
+    if [[ "${dirty_count}" == "0" ]]; then
+      labels+=("clean")
+    else
+      labels+=("dirty:${dirty_count}")
+    fi
+  fi
+
+  if [[ "${locked}" == "true" ]]; then
+    labels+=("locked")
+  fi
+
+  (
+    IFS=,
+    printf '%s\n' "${labels[*]}"
+  )
+}
+
+worktree_change_summary() {
+  local base branch path merge_base diff_summary untracked_count
+  base="$1"
+  branch="$2"
+  path="$3"
+
+  if ! accessible_worktree_path "${path}"; then
+    printf '%s\n' "-"
+    return 0
+  fi
+
+  merge_base="$(vibe_merge_base "${base}" "${path}" "${branch}" || true)"
+  [[ -n "${merge_base}" ]] || {
+    printf '%s\n' "-"
+    return 0
+  }
+
+  diff_summary="$(vibe_diff_shortstat "${merge_base}" "${path}")"
+  untracked_count="$(vibe_untracked_files "${path}" | wc -l | tr -d ' ')"
+
+  if [[ -n "${diff_summary}" ]]; then
+    printf '%s\n' "${diff_summary}"
+  elif [[ "${untracked_count}" != "0" ]]; then
+    printf '%s untracked file(s)\n' "${untracked_count}"
+  else
+    printf '%s\n' "none"
+  fi
 }
 
 print_vibe_context() {
@@ -682,11 +866,11 @@ print_vibe_context() {
   branch="$1"
   path="$2"
   base="$(base_branch)"
-  merge_base="$(vibe_merge_base "${base}" "${path}")"
+  merge_base="$(vibe_merge_base "${base}" "${path}" "${branch}" || true)"
   diff_summary="$(vibe_diff_shortstat "${merge_base}" "${path}")"
   dirty_count="$(vibe_dirty_count "${path}")"
   untracked_count="$(vibe_untracked_files "${path}" | wc -l | tr -d ' ')"
-  read -r behind ahead < <(git rev-list --left-right --count "${base}...${branch}")
+  read -r behind ahead < <(git rev-list --left-right --count "${base}...${branch}" 2>/dev/null || printf '0 0\n')
 
   say "Context:"
   say "  Branch: ${branch}"
@@ -709,13 +893,17 @@ print_vibe_context() {
     fi
   fi
 
-  if [[ "${dirty_count}" == "0" ]]; then
+  if ! accessible_worktree_path "${path}"; then
+    say "  Working tree: unavailable (worktree path missing)"
+  elif [[ "${dirty_count}" == "0" ]]; then
     say "  Working tree: clean"
   else
     say "  Working tree: ${dirty_count} uncommitted change(s)"
   fi
 
-  if [[ -n "${diff_summary}" ]]; then
+  if ! accessible_worktree_path "${path}"; then
+    say "  Changes vs ${base}: unavailable"
+  elif [[ -n "${diff_summary}" ]]; then
     say "  Changes vs ${base}: ${diff_summary}"
   elif [[ "${untracked_count}" != "0" ]]; then
     say "  Changes vs ${base}: ${untracked_count} untracked file(s)"
@@ -802,6 +990,7 @@ Usage:
   git vibe status [name]
   git vibe check [name]
   git vibe path <name>
+  git vibe doctor [--repair]
   git vibe prune
   git vibe version
   git vibe hook <pre-commit|commit-msg|pre-push> [args...]
@@ -818,6 +1007,8 @@ Examples:
   git vibe enter fallback-app-urls
   git vibe open fallback-app-urls
   git vibe diff fallback-app-urls
+  git vibe doctor
+  git vibe doctor --repair
   git vibe finish fallback-app-urls
   git vibe finish --sync fallback-app-urls
   git vibe finish --local fallback-app-urls
@@ -1406,18 +1597,60 @@ command_release() {
   fi
 }
 
-command_list() {
-  require_repo
+doctor_findings_raw() {
+  local branch path head detached bare locked locked_reason prunable prunable_reason detail
 
-  if [[ -z "$(list_vibes_raw)" ]]; then
-    say "No active vibes"
-    return 0
-  fi
-
-  printf '%-32s %s\n' "BRANCH" "PATH"
-  while IFS=$'\t' read -r branch path; do
-    printf '%-32s %s\n' "${branch}" "${path}"
+  while IFS=$'\t' read -r branch path head detached bare locked locked_reason prunable prunable_reason; do
+    if [[ "${prunable}" == "true" ]]; then
+      detail="stale worktree metadata"
+      if [[ -n "${prunable_reason}" ]]; then
+        detail="${detail}: ${prunable_reason}"
+      fi
+      printf '%s\t%s\t%s\t%s\n' "${branch}" "prunable" "${detail}" "${path}"
+    elif ! worktree_path_exists "${path}"; then
+      printf '%s\t%s\t%s\t%s\n' "${branch}" "missing" "worktree path is missing" "${path}"
+    elif ! accessible_worktree_path "${path}"; then
+      printf '%s\t%s\t%s\t%s\n' "${branch}" "broken" "worktree checkout is not accessible" "${path}"
+    fi
   done < <(list_vibes_raw)
+}
+
+repair_worktree_metadata() {
+  local branch path head detached bare locked locked_reason prunable prunable_reason
+
+  git worktree repair "$(repo_root)" >/dev/null 2>&1 || true
+
+  while IFS=$'\t' read -r branch path head detached bare locked locked_reason prunable prunable_reason; do
+    if accessible_worktree_path "${path}"; then
+      git worktree repair "${path}" >/dev/null 2>&1 || true
+    fi
+  done < <(list_vibes_raw)
+
+  git worktree prune >/dev/null 2>&1 || true
+}
+
+command_list() {
+  local base branch path head detached bare locked locked_reason prunable prunable_reason
+  local state ahead changes found
+  require_repo
+  base="$(base_branch)"
+  found="false"
+
+  while IFS=$'\t' read -r branch path head detached bare locked locked_reason prunable prunable_reason; do
+    if [[ "${found}" == "false" ]]; then
+      printf '%-32s %-18s %-10s %-32s %s\n' "BRANCH" "STATE" "AHEAD" "CHANGES" "PATH"
+      found="true"
+    fi
+
+    state="$(worktree_state_label "${path}" "${locked}" "${prunable}")"
+    ahead="$(vibe_ahead_behind_summary "${base}" "${branch}")"
+    changes="$(worktree_change_summary "${base}" "${branch}" "${path}")"
+    printf '%-32s %-18s %-10s %-32s %s\n' "${branch}" "${state}" "${ahead}" "${changes}" "${path}"
+  done < <(list_vibes_raw)
+
+  if [[ "${found}" == "false" ]]; then
+    say "No active vibes"
+  fi
 }
 
 command_status() {
@@ -1507,6 +1740,58 @@ command_prune() {
   require_repo
   git worktree prune
   say "Pruned stale worktree metadata"
+}
+
+command_doctor() {
+  local repair findings branch state detail path
+  require_repo
+
+  repair="false"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --repair)
+        repair="true"
+        ;;
+      -h|--help)
+        print_help
+        exit 0
+        ;;
+      *)
+        die "doctor does not take a vibe name"
+        ;;
+    esac
+    shift
+  done
+
+  if [[ "${repair}" == "true" ]]; then
+    say "Doctor: repairing worktree metadata"
+    repair_worktree_metadata
+    say ""
+  fi
+
+  findings="$(doctor_findings_raw)"
+
+  if [[ -z "${findings}" ]]; then
+    if [[ "${repair}" == "true" ]]; then
+      say "Doctor: no remaining worktree problems"
+    else
+      say "Doctor: no worktree problems found"
+    fi
+    return 0
+  fi
+
+  say "Doctor findings:"
+  printf '%-32s %-10s %-40s %s\n' "BRANCH" "STATE" "DETAIL" "PATH"
+  while IFS=$'\t' read -r branch state detail path; do
+    printf '%-32s %-10s %-40s %s\n' "${branch}" "${state}" "${detail}" "${path}"
+  done <<< "${findings}"
+
+  if [[ "${repair}" != "true" ]]; then
+    say ""
+    say "Next:"
+    say "  git vibe doctor --repair"
+    say "  git vibe prune"
+  fi
 }
 
 command_ship() {
@@ -1662,6 +1947,10 @@ main() {
     path)
       shift
       command_path "$@"
+      ;;
+    doctor)
+      shift
+      command_doctor "$@"
       ;;
     prune)
       shift

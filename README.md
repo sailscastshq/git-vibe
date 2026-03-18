@@ -19,6 +19,7 @@ The command surface is intentionally small:
 - `git vibe release <version> --push`
 - `git vibe list`
 - `git vibe status [name]`
+- `git vibe doctor [--repair]`
 - `git vibe prune`
 
 Under the hood, every vibe is a short-lived `feat/*` branch that is created as its own worktree. That gives humans and AI agents isolated lanes to work in without polluting `main`.
@@ -40,7 +41,7 @@ Git Vibe is also built for AI orchestration. When every `feat/*` branch gets its
 ## What the workflow includes
 
 - A portable `git-vibe` executable exposed as `git vibe ...`
-- `code`, `issue`, `pr`, `submit`, `enter`, `open`, `diff`, `finish`, `release`, `ship`, `list`, `status`, `check`, `checks`, `path`, `prune`, and `version` commands
+- `code`, `issue`, `pr`, `submit`, `enter`, `open`, `diff`, `finish`, `release`, `ship`, `list`, `status`, `check`, `checks`, `path`, `doctor`, `prune`, and `version` commands
 - Global hook wrappers for `pre-commit`, `commit-msg`, and `pre-push`
 - Semantic commit enforcement
 - Base-branch protection against direct commits and pushes
@@ -198,6 +199,13 @@ git vibe check
 git vibe finish --sync 9
 ```
 
+When you want a quick control-tower view of every open vibe, or you suspect a stale worktree after moving or deleting folders by hand, use:
+
+```bash
+git vibe list
+git vibe doctor
+```
+
 ## Commands
 
 ### `git vibe code [--editor] [--no-editor] [--codex|--vscode] <name|number>`
@@ -283,6 +291,8 @@ Finishes a vibe safely.
 
 Run it with no name from inside a feature worktree to finish the current vibe.
 
+Use `finish` when the branch lifecycle is complete. Use `doctor` or `prune` when the branch is still open but the worktree metadata got out of sync.
+
 ### `git vibe release <version> [--push]`
 
 Cuts a release directly from `main`. Git Vibe creates a `chore(release): vX.Y.Z` commit on `main` and adds an annotated `vX.Y.Z` tag. If the repo already has a top-level `VERSION` file, or you configure `vibe.releaseVersionFile`, Git Vibe updates that plain-text file too.
@@ -316,7 +326,7 @@ Alias for `git vibe release <version> [--push]`.
 
 ### `git vibe list`
 
-Lists active feature worktrees for the current repository.
+Lists active feature worktrees for the current repository, including each vibe's state, ahead/behind count against the base branch, and a short change summary.
 
 ### `git vibe status [name]`
 
@@ -334,9 +344,19 @@ Shows the individual GitHub checks for the current vibe, or for the named vibe w
 
 Prints the path for a vibe worktree.
 
+### `git vibe doctor [--repair]`
+
+Reports stale or broken vibe worktree metadata.
+
+- use `git vibe doctor` when `git vibe list` shows a missing or prunable vibe, or after you moved or deleted a worktree folder outside Git
+- use `git vibe doctor --repair` when you want Git Vibe to run `git worktree repair` and `git worktree prune` for you
+- use this for worktree health problems, not for merged-branch cleanup
+
 ### `git vibe prune`
 
 Runs `git worktree prune` to clean stale worktree metadata.
+
+If you are unsure what is stale, prefer `git vibe doctor` first because it shows the affected vibes before you prune.
 
 ### `git vibe version`
 

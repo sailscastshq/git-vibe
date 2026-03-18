@@ -137,16 +137,27 @@ List active vibes:
 git vibe list
 ```
 
+`git vibe list` should act like a control tower for the repo. It should show active vibe branches, worktree state like `clean`, `dirty`, `locked`, or `prunable`, ahead/behind against the base branch, and a short change summary.
+
 Show vibe status:
 
 ```bash
 git vibe status
 ```
 
+`git vibe status` or `git vibe check` should stay useful both from `main` and from inside a vibe worktree. When run inside a vibe, the reported vibe root should still point at the shared repo-level worktree area, not a nested path under the current worktree.
+
 Show the path for a vibe:
 
 ```bash
 git vibe path <name>
+```
+
+Inspect and repair worktree metadata:
+
+```bash
+git vibe doctor
+git vibe doctor --repair
 ```
 
 Prune stale worktree metadata:
@@ -203,6 +214,8 @@ The release command creates `chore(release): vX.Y.Z` on `main`, adds the annotat
 - `git vibe finish --local <name>` merges the vibe into local `main` with `--ff-only`, then cleans up.
 
 Keep `auto` as the default. It works offline, it does not force a network call, and it does not silently merge into `main`. Use `--sync` when you want fresh remote knowledge and `--local` when you want Git Vibe to perform the merge itself.
+
+Use `git vibe finish` when the branch lifecycle is complete. Use `git vibe doctor` when the branch is still active but the worktree metadata looks stale, missing, prunable, or otherwise unhealthy. Use raw `git vibe prune` as the lower-level cleanup command when you already know you just want to drop stale metadata.
 
 ## Install
 
