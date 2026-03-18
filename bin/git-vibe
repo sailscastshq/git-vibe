@@ -390,6 +390,148 @@ issue_number_for_branch() {
   return 1
 }
 
+session_slug_for_branch() {
+  slug_from_branch "$1"
+}
+
+session_key() {
+  local branch field
+  branch="$1"
+  field="$2"
+  printf 'vibe.session.%s.%s\n' "$(session_slug_for_branch "${branch}")" "${field}"
+}
+
+session_agent_for_branch() {
+  git_config_get "$(session_key "$1" agent)"
+}
+
+session_task_for_branch() {
+  git_config_get "$(session_key "$1" task)"
+}
+
+session_updated_at_for_branch() {
+  git_config_get "$(session_key "$1" updatedAt)"
+}
+
+session_has_metadata() {
+  local branch
+  branch="$1"
+  [[ -n "$(session_agent_for_branch "${branch}")" || -n "$(session_task_for_branch "${branch}")" || -n "$(session_updated_at_for_branch "${branch}")" ]]
+}
+
+timestamp_utc() {
+  date -u +"%Y-%m-%dT%H:%M:%SZ"
+}
+
+default_session_agent() {
+  if in_codex_shell; then
+    printf '%s\n' "codex"
+  fi
+}
+
+remember_session_metadata() {
+  local branch agent task updated_at
+  branch="$1"
+  agent="$2"
+  task="$3"
+  updated_at="$(timestamp_utc)"
+
+  if [[ -n "${agent}" ]]; then
+    git config "$(session_key "${branch}" agent)" "${agent}"
+  else
+    git config --unset-all "$(session_key "${branch}" agent)" >/dev/null 2>&1 || true
+  fi
+
+  if [[ -n "${task}" ]]; then
+    git config "$(session_key "${branch}" task)" "${task}"
+  else
+    git config --unset-all "$(session_key "${branch}" task)" >/dev/null 2>&1 || true
+  fi
+
+  if [[ -n "${agent}" || -n "${task}" ]]; then
+    git config "$(session_key "${branch}" updatedAt)" "${updated_at}"
+  else
+    git config --unset-all "$(session_key "${branch}" updatedAt)" >/dev/null 2>&1 || true
+  fi
+}
+
+touch_session_metadata() {
+  local branch
+  branch="$1"
+
+  session_has_metadata "${branch}" || return 0
+  git config "$(session_key "${branch}" updatedAt)" "$(timestamp_utc)"
+}
+
+clear_session_metadata() {
+  local branch
+  branch="$1"
+  git config --unset-all "$(session_key "${branch}" agent)" >/dev/null 2>&1 || true
+  git config --unset-all "$(session_key "${branch}" task)" >/dev/null 2>&1 || true
+  git config --unset-all "$(session_key "${branch}" updatedAt)" >/dev/null 2>&1 || true
+}
+
+truncate_text() {
+  local text limit
+  text="$1"
+  limit="$2"
+
+  if (( ${#text} <= limit )); then
+    printf '%s\n' "${text}"
+  elif (( limit <= 3 )); then
+    printf '%s\n' "${text:0:limit}"
+  else
+    printf '%s...\n' "${text:0:$((limit - 3))}"
+  fi
+}
+
+session_summary_for_branch() {
+  local branch agent task
+  branch="$1"
+  agent="$(session_agent_for_branch "${branch}")"
+  task="$(session_task_for_branch "${branch}")"
+
+  if [[ -n "${agent}" && -n "${task}" ]]; then
+    printf '%s\n' "${agent}: $(truncate_text "${task}" 24)"
+  elif [[ -n "${task}" ]]; then
+    truncate_text "${task}" 32
+  elif [[ -n "${agent}" ]]; then
+    printf '%s\n' "${agent}"
+  else
+    printf '%s\n' "-"
+  fi
+}
+
+print_session_context() {
+  local branch mode agent task updated_at
+  branch="$1"
+  mode="${2:-optional}"
+  agent="$(session_agent_for_branch "${branch}")"
+  task="$(session_task_for_branch "${branch}")"
+  updated_at="$(session_updated_at_for_branch "${branch}")"
+
+  if [[ -z "${agent}" && -z "${task}" && -z "${updated_at}" ]]; then
+    if [[ "${mode}" == "always" ]]; then
+      say "  Session: none recorded"
+    fi
+    return 0
+  fi
+
+  if [[ -n "${agent}" ]]; then
+    say "  Session: ${agent}"
+  else
+    say "  Session: recorded"
+  fi
+
+  if [[ -n "${task}" ]]; then
+    say "  Task: ${task}"
+  fi
+
+  if [[ -n "${updated_at}" ]]; then
+    say "  Last activity: ${updated_at}"
+  fi
+}
+
 titleize_slug() {
   printf '%s\n' "$1" | tr '-' ' ' | awk '{
     for (i = 1; i <= NF; i++) {
@@ -945,6 +1087,8 @@ print_vibe_context() {
     fi
   fi
 
+  print_session_context "${branch}"
+
   if ! accessible_worktree_path "${path}"; then
     say "  Working tree: unavailable (worktree path missing)"
   elif [[ "${dirty_count}" == "0" ]]; then
@@ -1027,8 +1171,9 @@ print_help() {
 Git Vibe
 
 Usage:
-  git vibe code [--editor|--no-editor] [--codex|--vscode] <name>
-  git vibe issue [--editor|--no-editor] [--codex|--vscode] <number>
+  git vibe code [--editor|--no-editor] [--codex|--vscode] [--agent <agent>] [--task <task>] <name>
+  git vibe issue [--editor|--no-editor] [--codex|--vscode] [--agent <agent>] [--task <task>] <number>
+  git vibe session [--agent <agent>] [--task <task>] [--clear] [name]
   git vibe pr [--draft] [--web] [--title <title>] [--body <body>] [name]
   git vibe submit [--draft] [--web] [--title <title>] [--body <body>] [name]
   git vibe checks [name]
@@ -1049,8 +1194,10 @@ Usage:
 
 Examples:
   git vibe code fallback-app-urls
+  git vibe code --agent codex --task "fix login redirect" fallback-app-urls
   git vibe code 9
   git vibe issue 9
+  git vibe session --task "polish the docs" 9
   git vibe pr
   git vibe submit 10
   git vibe checks 10
@@ -1105,6 +1252,8 @@ open_workspace_for_path() {
 
 command_code() {
   local name slug branch base path shell_output open_editor action base_path editor_mode workspace_app workspace_app_override
+  local session_agent session_task current_session_agent current_session_task final_session_agent final_session_task detected_session_agent
+  local agent_set task_set
   local issue_number issue_title issue_url issue_metadata
   local -a name_parts
   require_repo
@@ -1112,6 +1261,10 @@ command_code() {
   shell_output="false"
   open_editor=""
   workspace_app_override=""
+  session_agent=""
+  session_task=""
+  agent_set="false"
+  task_set="false"
   name_parts=()
 
   while [[ $# -gt 0 ]]; do
@@ -1130,6 +1283,18 @@ command_code() {
         ;;
       --vscode)
         workspace_app_override="vscode"
+        ;;
+      --agent)
+        shift
+        [[ $# -gt 0 ]] || die "--agent requires a value"
+        session_agent="$1"
+        agent_set="true"
+        ;;
+      --task)
+        shift
+        [[ $# -gt 0 ]] || die "--task requires a value"
+        session_task="$1"
+        task_set="true"
         ;;
       -h|--help)
         print_help
@@ -1211,6 +1376,31 @@ command_code() {
     remember_issue_branch "${issue_number}" "${branch}" "${issue_title}" "${issue_url}"
   fi
 
+  if [[ "${agent_set}" == "true" || "${task_set}" == "true" ]]; then
+    current_session_agent="$(session_agent_for_branch "${branch}")"
+    current_session_task="$(session_task_for_branch "${branch}")"
+    final_session_agent="${current_session_agent}"
+    final_session_task="${current_session_task}"
+
+    if [[ "${agent_set}" == "true" ]]; then
+      final_session_agent="${session_agent}"
+    fi
+
+    if [[ "${task_set}" == "true" ]]; then
+      final_session_task="${session_task}"
+      if [[ -z "${final_session_agent}" ]]; then
+        detected_session_agent="$(default_session_agent)"
+        if [[ -n "${detected_session_agent}" ]]; then
+          final_session_agent="${detected_session_agent}"
+        fi
+      fi
+    fi
+
+    remember_session_metadata "${branch}" "${final_session_agent}" "${final_session_task}"
+  else
+    touch_session_metadata "${branch}"
+  fi
+
   say "${action} ${branch}"
   say "Path: ${path}"
   print_vibe_context "${branch}" "${path}"
@@ -1257,6 +1447,12 @@ command_issue() {
     case "$1" in
       --shell-output|--editor|--no-editor|--codex|--vscode)
         ;;
+      --agent|--task)
+        local flag_name
+        flag_name="$1"
+        shift
+        [[ $# -gt 0 ]] || die "${flag_name} requires a value"
+        ;;
       -h|--help)
         print_help
         exit 0
@@ -1273,6 +1469,89 @@ command_issue() {
   fi
 
   command_code "${passthrough[@]}"
+}
+
+command_session() {
+  local branch session_agent session_task current_session_agent current_session_task final_session_agent final_session_task detected_session_agent
+  local agent_set task_set clear
+  local -a name_parts
+  require_repo
+
+  session_agent=""
+  session_task=""
+  agent_set="false"
+  task_set="false"
+  clear="false"
+  name_parts=()
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --agent)
+        shift
+        [[ $# -gt 0 ]] || die "--agent requires a value"
+        session_agent="$1"
+        agent_set="true"
+        ;;
+      --task)
+        shift
+        [[ $# -gt 0 ]] || die "--task requires a value"
+        session_task="$1"
+        task_set="true"
+        ;;
+      --clear)
+        clear="true"
+        ;;
+      -h|--help)
+        print_help
+        exit 0
+        ;;
+      *)
+        name_parts+=("$1")
+        ;;
+    esac
+    shift
+  done
+
+  branch="$(resolve_vibe_branch "${name_parts[@]}")"
+
+  if [[ "${clear}" == "true" ]]; then
+    clear_session_metadata "${branch}"
+    say "Cleared session metadata for ${branch}"
+    say "Session:"
+    print_session_context "${branch}" "always"
+    return 0
+  fi
+
+  if [[ "${agent_set}" != "true" && "${task_set}" != "true" ]]; then
+    touch_session_metadata "${branch}"
+    say "Session for ${branch}:"
+    print_session_context "${branch}" "always"
+    return 0
+  fi
+
+  current_session_agent="$(session_agent_for_branch "${branch}")"
+  current_session_task="$(session_task_for_branch "${branch}")"
+  final_session_agent="${current_session_agent}"
+  final_session_task="${current_session_task}"
+
+  if [[ "${agent_set}" == "true" ]]; then
+    final_session_agent="${session_agent}"
+  fi
+
+  if [[ "${task_set}" == "true" ]]; then
+    final_session_task="${session_task}"
+  fi
+
+  if [[ -z "${final_session_agent}" && -n "${final_session_task}" ]]; then
+    detected_session_agent="$(default_session_agent)"
+    if [[ -n "${detected_session_agent}" ]]; then
+      final_session_agent="${detected_session_agent}"
+    fi
+  fi
+
+  remember_session_metadata "${branch}" "${final_session_agent}" "${final_session_task}"
+  say "Updated session for ${branch}"
+  print_session_context "${branch}" "always"
 }
 
 command_pr() {
@@ -1317,6 +1596,7 @@ command_pr() {
   done
 
   branch="$(resolve_vibe_branch "${name_parts[@]}")"
+  touch_session_metadata "${branch}"
   base="$(base_branch)"
   ensure_branch_pushed "${branch}"
 
@@ -1375,6 +1655,7 @@ command_enter() {
   done
 
   branch="$(resolve_vibe_branch "${name_parts[@]}")"
+  touch_session_metadata "${branch}"
   path="$(worktree_path_for_branch "${branch}")"
 
   say "Entering ${branch}"
@@ -1414,6 +1695,7 @@ command_open() {
   done
 
   branch="$(resolve_vibe_branch "${name_parts[@]}")"
+  touch_session_metadata "${branch}"
   path="$(worktree_path_for_branch "${branch}")"
   workspace_app="$(resolve_workspace_app "${workspace_app}")"
   [[ -n "${workspace_app}" ]] || die "no supported workspace app found; install 'code' or 'codex'"
@@ -1429,6 +1711,7 @@ command_checks() {
   require_repo
 
   branch="$(resolve_vibe_branch "$@")"
+  touch_session_metadata "${branch}"
   checks_output="$(fetch_pr_checks_detail "${branch}" || true)"
 
   if [[ -z "${checks_output}" ]]; then
@@ -1448,6 +1731,7 @@ command_diff() {
   require_repo
 
   branch="$(resolve_vibe_branch "$@")"
+  touch_session_metadata "${branch}"
   path="$(worktree_path_for_branch "${branch}")"
   base="$(base_branch)"
   merge_base="$(vibe_merge_base "${base}" "${path}")"
@@ -1575,6 +1859,7 @@ command_finish() {
     fi
 
     git branch -d "${branch}" >/dev/null
+    clear_session_metadata "${branch}"
     git worktree prune >/dev/null 2>&1 || true
   )
 
@@ -1706,21 +1991,22 @@ repair_worktree_metadata() {
 
 command_list() {
   local base branch path head detached bare locked locked_reason prunable prunable_reason
-  local state ahead changes found
+  local state ahead session changes found
   require_repo
   base="$(base_branch)"
   found="false"
 
   while IFS=$'\t' read -r branch path head detached bare locked locked_reason prunable prunable_reason; do
     if [[ "${found}" == "false" ]]; then
-      printf '%-32s %-18s %-10s %-32s %s\n' "BRANCH" "STATE" "AHEAD" "CHANGES" "PATH"
+      printf '%-32s %-18s %-10s %-32s %-32s %s\n' "BRANCH" "STATE" "AHEAD" "SESSION" "CHANGES" "PATH"
       found="true"
     fi
 
     state="$(worktree_state_label "${path}" "${locked}" "${prunable}")"
     ahead="$(vibe_ahead_behind_summary "${base}" "${branch}")"
+    session="$(session_summary_for_branch "${branch}")"
     changes="$(worktree_change_summary "${base}" "${branch}" "${path}")"
-    printf '%-32s %-18s %-10s %-32s %s\n' "${branch}" "${state}" "${ahead}" "${changes}" "${path}"
+    printf '%-32s %-18s %-10s %-32s %-32s %s\n' "${branch}" "${state}" "${ahead}" "${session}" "${changes}" "${path}"
   done < <(list_vibes_raw)
 
   if [[ "${found}" == "false" ]]; then
@@ -1773,6 +2059,7 @@ command_status() {
 
   if [[ ${#name_parts[@]} -gt 0 ]]; then
     branch="$(resolve_vibe_branch "${name_parts[@]}")"
+    touch_session_metadata "${branch}"
     path="$(worktree_path_for_branch "${branch}")"
     print_vibe_context "${branch}" "${path}"
     print_pr_context "${branch}"
@@ -1780,6 +2067,7 @@ command_status() {
   fi
 
   if is_vibe_branch "${current}"; then
+    touch_session_metadata "${current}"
     print_vibe_context "${current}" "$(repo_root)"
     print_pr_context "${current}"
     say ""
@@ -1969,6 +2257,10 @@ main() {
     issue)
       shift
       command_issue "$@"
+      ;;
+    session)
+      shift
+      command_session "$@"
       ;;
     pr)
       shift

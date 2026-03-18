@@ -6,6 +6,7 @@ The command surface is intentionally small:
 
 - `git vibe code <name>`
 - `git vibe issue <number>`
+- `git vibe session [name]`
 - `git vibe pr`
 - `git vibe submit`
 - `git vibe enter [name]`
@@ -41,7 +42,7 @@ Git Vibe is also built for AI orchestration. When every `feat/*` branch gets its
 ## What the workflow includes
 
 - A portable `git-vibe` executable exposed as `git vibe ...`
-- `code`, `issue`, `pr`, `submit`, `enter`, `open`, `diff`, `finish`, `release`, `ship`, `list`, `status`, `check`, `checks`, `path`, `doctor`, `prune`, and `version` commands
+- `code`, `issue`, `session`, `pr`, `submit`, `enter`, `open`, `diff`, `finish`, `release`, `ship`, `list`, `status`, `check`, `checks`, `path`, `doctor`, `prune`, and `version` commands
 - Global hook wrappers for `pre-commit`, `commit-msg`, and `pre-push`
 - Semantic commit enforcement
 - Base-branch protection against direct commits and pushes
@@ -122,6 +123,12 @@ git vibe code 9
 git vibe issue 9
 ```
 
+If you want the vibe to remember which agent is working on it and what that session is about, attach lightweight session metadata when you open it:
+
+```bash
+git vibe code --agent codex --task "fix login redirect" 9
+```
+
 After you’ve made the change, Git Vibe can also open the PR for you:
 
 ```bash
@@ -151,6 +158,8 @@ If you rerun `git vibe code fallback-app-urls`, Git Vibe reopens the existing wo
 If you start from an issue number, Git Vibe fetches the issue title through `gh` and creates a deterministic branch such as `feat/9-issue-aware-vibe-creation`. Later reruns of `git vibe code 9` or `git vibe issue 9` reopen that same vibe even if the issue title changes on GitHub.
 
 When it opens or reopens a vibe, Git Vibe also prints a short workspace summary with the branch, base, path, compare target, and current change state. That makes the worktree feel anchored even in tools that do not visibly switch context for you.
+
+If you attach session metadata, that summary also carries the session label, task, and last activity timestamp. That gives each vibe a lightweight memory so it is easier to come back later and understand what the lane was for.
 
 If a tool still looks visually anchored to the base checkout, you can explicitly jump back into a vibe later with:
 
@@ -234,13 +243,24 @@ Use `--editor` or `--no-editor` to override the launch policy for a single run. 
 
 After opening a vibe, Git Vibe prints a context summary with the branch, base, path, compare target, and current change state so you can orient yourself quickly in Codex, VS Code, or a plain terminal.
 
-### `git vibe issue [--editor] [--no-editor] [--codex|--vscode] <number>`
+If you pass `--agent <agent>` or `--task <task>`, Git Vibe also records lightweight session metadata for that vibe.
+
+### `git vibe issue [--editor] [--no-editor] [--codex|--vscode] [--agent <agent>] [--task <task>] <number>`
 
 Explicit issue-first alias for `git vibe code <number>`.
 
 - use this when you want the CLI to read clearly as “start work from issue 9”
 - Git Vibe requires `gh` only when it needs to fetch issue metadata for a new issue-driven vibe
 - once the vibe exists, Git Vibe can reopen it by issue number from the stored branch mapping
+
+### `git vibe session [--agent <agent>] [--task <task>] [--clear] [name]`
+
+Shows or updates the lightweight session metadata for a vibe.
+
+- use this when you want to attach or revise the agent label and task without reopening the vibe
+- run it with no flags to inspect the current metadata for a vibe
+- use `--clear` to remove the saved session metadata entirely
+- the metadata is local Git config for the repo, so it is meant to help humans and agents on your machine resume context later
 
 ### `git vibe pr [--draft] [--web] [--title <title>] [--body <body>] [name]`
 
@@ -262,6 +282,7 @@ Jumps back into an existing vibe worktree and prints the same focused context su
 - run it from `main` with a vibe name when you want to reopen a specific lane
 - run it inside a vibe with no name to confirm where you are and re-anchor the current workspace
 - shell integration uses it for an explicit "take me there" flow when `git vibe code ...` was not the command that opened your current terminal
+- if the vibe has saved session metadata, `enter` also shows that context again so resuming the lane feels less guessy
 
 ### `git vibe open [--codex|--vscode] [name]`
 
@@ -336,11 +357,11 @@ Alias for `git vibe release <version> [--push]`.
 
 ### `git vibe list`
 
-Lists active feature worktrees for the current repository, including each vibe's state, ahead/behind count against the base branch, and a short change summary.
+Lists active feature worktrees for the current repository, including each vibe's state, ahead/behind count against the base branch, session summary, and a short change summary.
 
 ### `git vibe status [name]`
 
-Shows the current repository, base branch, branch prefix, worktree root, and active vibes. When run inside a vibe worktree, or when you pass a vibe name, it also prints a focused workspace summary for that vibe, including linked PR state and a checks summary when available through `gh`.
+Shows the current repository, base branch, branch prefix, worktree root, and active vibes. When run inside a vibe worktree, or when you pass a vibe name, it also prints a focused workspace summary for that vibe, including session metadata, linked PR state, and a checks summary when available through `gh`.
 
 ### `git vibe check [name]`
 
