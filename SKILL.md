@@ -236,7 +236,6 @@ Release versioning should look like this:
 - `npm` means Git Vibe updates `package.json` and any existing npm lockfile
 - checked-in repos should prefer `[release] versioning = "..."` in `vibe.toml`
 - local overrides can use `git config vibe.releaseVersioning ...` and `git config vibe.releaseFile ...`
-- keep backward compatibility with `vibe.releaseVersionFile`, but treat it as a legacy alias for file versioning
 
 ## Finish modes
 

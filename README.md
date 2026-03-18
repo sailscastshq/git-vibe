@@ -569,9 +569,7 @@ git config vibe.releaseVersioning npm
 versioning = "npm"
 ```
 
-`git vibe release` still defaults to the old simple path for plain `VERSION` file repos: if a top-level `VERSION` file already exists, Git Vibe treats that as `versioning = "file"` automatically. Otherwise it defaults to `none` unless you configure another mode.
-
-For backward compatibility, `vibe.releaseVersionFile` and `[vibe].releaseVersionFile` still behave like file versioning. New configs should prefer `release.versioning` and `release.file`.
+`git vibe release` still defaults to the simple path for plain `VERSION` file repos: if a top-level `VERSION` file already exists, Git Vibe treats that as `versioning = "file"` automatically. Otherwise it defaults to `none` unless you configure another mode.
 
 Lifecycle hooks live in the `[hooks]` section of `vibe.toml` and run through `sh -c`.
 

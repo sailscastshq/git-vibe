@@ -276,12 +276,6 @@ release_file_setting() {
     return 0
   fi
 
-  configured="$(shared_setting_get vibe.releaseVersionFile vibe releaseVersionFile)"
-  if [[ -n "${configured}" ]]; then
-    printf '%s\n' "${configured}"
-    return 0
-  fi
-
   if [[ -f "$(repo_root)/VERSION" ]]; then
     printf '%s\n' "VERSION"
   fi
