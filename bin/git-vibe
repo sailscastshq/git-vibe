@@ -77,6 +77,12 @@ workspace_app_setting() {
   printf '%s\n' "${configured:-auto}"
 }
 
+delete_remote_on_finish() {
+  local configured
+  configured="$(git config --bool --get vibe.deleteRemoteOnFinish 2>/dev/null || true)"
+  printf '%s\n' "${configured:-false}"
+}
+
 issue_branch_style() {
   local configured
   configured="$(git_config_get vibe.issueBranchStyle)"
@@ -117,6 +123,16 @@ validate_workspace_app() {
       ;;
     *)
       die "invalid vibe.openWorkspaceWith: $1 (expected auto, codex, or vscode)"
+      ;;
+  esac
+}
+
+validate_delete_remote_on_finish() {
+  case "$1" in
+    true|false)
+      ;;
+    *)
+      die "invalid vibe.deleteRemoteOnFinish: $1 (expected true or false)"
       ;;
   esac
 }
@@ -559,6 +575,42 @@ remote_branch_exists() {
   git show-ref --verify --quiet "refs/remotes/$1"
 }
 
+prune_remote_tracking_branch() {
+  local branch
+  branch="$1"
+  git update-ref -d "refs/remotes/origin/${branch}" >/dev/null 2>&1 || true
+}
+
+delete_remote_branch() {
+  local branch output
+  branch="$1"
+
+  if ! git remote get-url origin >/dev/null 2>&1; then
+    say "Remote branch: skipped (origin not configured)"
+    return 0
+  fi
+
+  if ! remote_branch_exists "origin/${branch}"; then
+    prune_remote_tracking_branch "${branch}"
+    say "Remote branch: already absent (origin/${branch})"
+    return 0
+  fi
+
+  output="$(git push origin --delete "${branch}" 2>&1)" || {
+    if [[ "${output}" == *"remote ref does not exist"* || "${output}" == *"remote ref not found"* || "${output}" == *"couldn't find remote ref"* ]]; then
+      prune_remote_tracking_branch "${branch}"
+      say "Remote branch: already absent (origin/${branch})"
+      return 0
+    fi
+
+    printf '%s\n' "${output}" >&2
+    die "could not delete origin/${branch}"
+  }
+
+  prune_remote_tracking_branch "${branch}"
+  say "Remote branch: deleted origin/${branch}"
+}
+
 is_ancestor_of() {
   git merge-base --is-ancestor "$1" "$2" >/dev/null 2>&1
 }
@@ -983,7 +1035,7 @@ Usage:
   git vibe enter [name]
   git vibe open [--codex|--vscode] [name]
   git vibe diff [name]
-  git vibe finish [--local] [--sync] [name]
+  git vibe finish [--local] [--sync] [--delete-remote|--keep-remote] [name]
   git vibe release <version> [--push]
   git vibe ship <version> [--push]
   git vibe list
@@ -1010,6 +1062,7 @@ Examples:
   git vibe doctor
   git vibe doctor --repair
   git vibe finish fallback-app-urls
+  git vibe finish --delete-remote fallback-app-urls
   git vibe finish --sync fallback-app-urls
   git vibe finish --local fallback-app-urls
   git vibe release 0.0.2
@@ -1410,13 +1463,14 @@ command_diff() {
 }
 
 command_finish() {
-  local name branch slug path mode sync base merged_into shell_output base_path
+  local name branch slug path mode sync base merged_into shell_output base_path delete_remote delete_remote_override
   local -a name_parts
   require_repo
 
   mode="auto"
   sync="false"
   shell_output="false"
+  delete_remote_override=""
   name=""
   name_parts=()
 
@@ -1427,6 +1481,12 @@ command_finish() {
         ;;
       --sync)
         sync="true"
+        ;;
+      --delete-remote)
+        delete_remote_override="true"
+        ;;
+      --keep-remote)
+        delete_remote_override="false"
         ;;
       --shell-output)
         shell_output="true"
@@ -1443,6 +1503,11 @@ command_finish() {
   done
 
   base="$(base_branch)"
+  delete_remote="$(delete_remote_on_finish)"
+  validate_delete_remote_on_finish "${delete_remote}"
+  if [[ -n "${delete_remote_override}" ]]; then
+    delete_remote="${delete_remote_override}"
+  fi
   base_path="$(base_worktree_path || true)"
   [[ -n "${base_path}" ]] || base_path="$(repo_root)"
 
@@ -1495,6 +1560,13 @@ command_finish() {
 
   [[ -n "${base_path}" ]] || die "could not find a stable worktree for ${base}"
 
+  if [[ "${delete_remote}" == "true" ]]; then
+    (
+      cd "${base_path}" >/dev/null 2>&1 || die "could not enter ${base_path}"
+      delete_remote_branch "${branch}"
+    )
+  fi
+
   (
     cd "${base_path}" >/dev/null 2>&1 || die "could not enter ${base_path}"
 
@@ -1508,6 +1580,9 @@ command_finish() {
 
   say "Finished ${branch}"
   say "Merged into: ${merged_into}"
+  if [[ "${delete_remote}" == "false" ]]; then
+    say "Remote branch: kept"
+  fi
 
   if [[ "${shell_output}" == "true" ]]; then
     say_shell_chdir "${base_path}"
@@ -1654,7 +1729,7 @@ command_list() {
 }
 
 command_status() {
-  local base current prefix root editor_mode workspace_app issue_style branch path
+  local base current prefix root editor_mode workspace_app issue_style delete_remote_finish branch path
   local -a name_parts
   require_repo
 
@@ -1679,9 +1754,11 @@ command_status() {
   editor_mode="$(open_editor_mode)"
   workspace_app="$(workspace_app_setting)"
   issue_style="$(issue_branch_style)"
+  delete_remote_finish="$(delete_remote_on_finish)"
   validate_open_editor_mode "${editor_mode}"
   validate_workspace_app "${workspace_app}"
   validate_issue_branch_style "${issue_style}"
+  validate_delete_remote_on_finish "${delete_remote_finish}"
 
   say "Repo: $(repo_root)"
   say "Base branch: ${base}"
@@ -1691,6 +1768,7 @@ command_status() {
   say "Open editor: ${editor_mode}"
   say "Open workspace with: ${workspace_app}"
   say "Issue branch style: ${issue_style}"
+  say "Delete remote on finish: ${delete_remote_finish}"
   say ""
 
   if [[ ${#name_parts[@]} -gt 0 ]]; then

@@ -12,6 +12,8 @@ ISSUE_WORKTREE_DIR="${TMP_DIR}/.vibe/demo/9-issue-aware-vibe-creation"
 TITLE_ONLY_ISSUE_WORKTREE_DIR="${TMP_DIR}/.vibe/demo/issue-title-only-branch"
 DOCTOR_DIRTY_WORKTREE_DIR="${TMP_DIR}/.vibe/demo/doctor-dirty"
 DOCTOR_STALE_WORKTREE_DIR="${TMP_DIR}/.vibe/demo/doctor-stale"
+REMOTE_DELETE_WORKTREE_DIR="${TMP_DIR}/.vibe/demo/remote-delete"
+REMOTE_ALREADY_GONE_WORKTREE_DIR="${TMP_DIR}/.vibe/demo/remote-already-gone"
 AUTO_EDITOR_WORKTREE_DIR="${TMP_DIR}/.vibe/demo/auto-editor"
 ALWAYS_EDITOR_WORKTREE_DIR="${TMP_DIR}/.vibe/demo/always-editor"
 NEVER_EDITOR_WORKTREE_DIR="${TMP_DIR}/.vibe/demo/never-editor"
@@ -354,14 +356,20 @@ ISSUE_PR_CHECKS_OUTPUT="$(
 [[ "${ISSUE_PR_CHECKS_OUTPUT}" == *"Checks for feat/9-issue-aware-vibe-creation"* ]] || fail "checks did not target the issue vibe branch"
 [[ "${ISSUE_PR_CHECKS_OUTPUT}" == *"unit"* ]] || fail "checks did not print the expected check rows"
 
-(
+git -C "${REPO_DIR}" config vibe.deleteRemoteOnFinish true
+
+ISSUE_FINISH_OUTPUT="$(
   cd "${REPO_DIR}" >/dev/null
-  "${ROOT}/bin/git-vibe" finish --local 9 >/dev/null
-)
+  "${ROOT}/bin/git-vibe" finish --local 9
+)"
+[[ "${ISSUE_FINISH_OUTPUT}" == *"Remote branch: deleted origin/feat/9-issue-aware-vibe-creation"* ]] || fail "issue-aware finish did not delete the remote branch when vibe.deleteRemoteOnFinish=true"
 
 [[ ! -d "${ISSUE_WORKTREE_DIR}" ]] || fail "issue-aware finish did not remove the worktree"
 if git -C "${REPO_DIR}" show-ref --verify --quiet refs/heads/feat/9-issue-aware-vibe-creation; then
   fail "issue-aware finish did not delete the feature branch"
+fi
+if git --git-dir="${ORIGIN_DIR}" show-ref --verify --quiet refs/heads/feat/9-issue-aware-vibe-creation; then
+  fail "issue-aware finish did not delete the remote branch"
 fi
 
 git -C "${REPO_DIR}" config vibe.issueBranchStyle title-only
@@ -377,8 +385,49 @@ ISSUE_COMMAND_OUTPUT="$(
 git -C "${REPO_DIR}" worktree remove "${TITLE_ONLY_ISSUE_WORKTREE_DIR}" >/dev/null
 git -C "${REPO_DIR}" branch -d feat/issue-title-only-branch >/dev/null
 git -C "${REPO_DIR}" config --unset vibe.issueBranchStyle
+git -C "${REPO_DIR}" config --unset vibe.deleteRemoteOnFinish
 
 printf 'smoke: issue flow ok\n'
+
+(
+  cd "${REPO_DIR}" >/dev/null
+  "${ROOT}/bin/git-vibe" code remote-delete >/dev/null
+)
+[[ -d "${REMOTE_DELETE_WORKTREE_DIR}" ]] || fail "remote delete worktree was not created"
+printf '\nRemote delete change\n' >> "${REMOTE_DELETE_WORKTREE_DIR}/README.md"
+git -C "${REMOTE_DELETE_WORKTREE_DIR}" add README.md
+git -C "${REMOTE_DELETE_WORKTREE_DIR}" commit -m "feat: update readme for remote delete" >/dev/null
+git -C "${REMOTE_DELETE_WORKTREE_DIR}" push -u origin feat/remote-delete >/dev/null
+
+REMOTE_DELETE_FINISH_OUTPUT="$(
+  cd "${REPO_DIR}" >/dev/null
+  "${ROOT}/bin/git-vibe" finish --local --delete-remote remote-delete
+)"
+[[ "${REMOTE_DELETE_FINISH_OUTPUT}" == *"Remote branch: deleted origin/feat/remote-delete"* ]] || fail "finish --delete-remote did not report remote branch deletion"
+if git --git-dir="${ORIGIN_DIR}" show-ref --verify --quiet refs/heads/feat/remote-delete; then
+  fail "finish --delete-remote did not delete the remote branch"
+fi
+
+(
+  cd "${REPO_DIR}" >/dev/null
+  "${ROOT}/bin/git-vibe" code remote-already-gone >/dev/null
+)
+[[ -d "${REMOTE_ALREADY_GONE_WORKTREE_DIR}" ]] || fail "remote already gone worktree was not created"
+printf '\nRemote already gone change\n' >> "${REMOTE_ALREADY_GONE_WORKTREE_DIR}/README.md"
+git -C "${REMOTE_ALREADY_GONE_WORKTREE_DIR}" add README.md
+git -C "${REMOTE_ALREADY_GONE_WORKTREE_DIR}" commit -m "feat: update readme for remote already gone" >/dev/null
+git -C "${REMOTE_ALREADY_GONE_WORKTREE_DIR}" push -u origin feat/remote-already-gone >/dev/null
+git -C "${REMOTE_ALREADY_GONE_WORKTREE_DIR}" push origin --delete feat/remote-already-gone >/dev/null
+git -C "${REPO_DIR}" config vibe.deleteRemoteOnFinish true
+
+REMOTE_ALREADY_GONE_FINISH_OUTPUT="$(
+  cd "${REPO_DIR}" >/dev/null
+  "${ROOT}/bin/git-vibe" finish --local remote-already-gone
+)"
+[[ "${REMOTE_ALREADY_GONE_FINISH_OUTPUT}" == *"Remote branch: already absent (origin/feat/remote-already-gone)"* ]] || fail "finish did not tolerate an already deleted remote branch"
+git -C "${REPO_DIR}" config --unset vibe.deleteRemoteOnFinish
+
+printf 'smoke: remote finish cleanup ok\n'
 
 (
   cd "${REPO_DIR}" >/dev/null
