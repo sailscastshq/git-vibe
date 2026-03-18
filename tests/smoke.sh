@@ -5,6 +5,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TMP_DIR="$(cd "$(mktemp -d)" && pwd -P)"
 REPO_DIR="${TMP_DIR}/demo"
 CONFIG_REPO_DIR="${TMP_DIR}/config-demo"
+NPM_REPO_DIR="${TMP_DIR}/npm-demo"
 ORIGIN_DIR="${TMP_DIR}/origin.git"
 CONFIG_GLOBAL_FILE="${TMP_DIR}/config-global.gitconfig"
 HOOKS_DIR="${TMP_DIR}/hooks"
@@ -262,7 +263,10 @@ openEditor = "never"
 openWorkspaceWith = "vscode"
 deleteRemoteOnFinish = true
 issueBranchStyle = "number-only"
-releaseVersionFile = "VERSION"
+
+[release]
+versioning = "file"
+file = "VERSION"
 
 [hooks]
 post-create = "${CONFIG_HOOK_RECORDER}"
@@ -337,10 +341,53 @@ CONFIG_RELEASE_OUTPUT="$(
   GIT_CONFIG_GLOBAL="${CONFIG_GLOBAL_FILE}" "${ROOT}/bin/git-vibe" release 1.2.3
 )"
 [[ "${CONFIG_RELEASE_OUTPUT}" == *"Hook: ran pre-release"* ]] || fail "release did not report the pre-release hook"
+[[ "${CONFIG_RELEASE_OUTPUT}" == *"Versioning: file"* ]] || fail "release did not report file versioning from vibe.toml"
 [[ "$(<"${CONFIG_HOOK_LOG}")" == *"pre-release|main|${CONFIG_REPO_DIR}|1.2.3|"* ]] || fail "pre-release hook did not receive the expected release context"
-[[ "$(<"${CONFIG_REPO_DIR}/VERSION")" == "1.2.3" ]] || fail "release did not honor vibe.toml releaseVersionFile"
+[[ "$(<"${CONFIG_REPO_DIR}/VERSION")" == "1.2.3" ]] || fail "release did not honor release.versioning=file"
 
 printf 'smoke: repo config and hooks ok\n'
+
+git init "${NPM_REPO_DIR}" >/dev/null
+git -C "${NPM_REPO_DIR}" config user.name "Git Vibe Smoke"
+git -C "${NPM_REPO_DIR}" config user.email "smoke@example.com"
+git -C "${NPM_REPO_DIR}" config core.hooksPath "${HOOKS_DIR}"
+git -C "${NPM_REPO_DIR}" switch -c main >/dev/null
+git -C "${NPM_REPO_DIR}" config vibe.releaseVersioning npm
+
+cat > "${NPM_REPO_DIR}/package.json" <<EOF
+{
+  "name": "npm-demo",
+  "version": "0.1.0"
+}
+EOF
+cat > "${NPM_REPO_DIR}/package-lock.json" <<EOF
+{
+  "name": "npm-demo",
+  "version": "0.1.0",
+  "lockfileVersion": 3,
+  "requires": true,
+  "packages": {
+    "": {
+      "name": "npm-demo",
+      "version": "0.1.0"
+    }
+  }
+}
+EOF
+git -C "${NPM_REPO_DIR}" add package.json package-lock.json
+VIBE_ALLOW_COMMIT_BASE=1 git -C "${NPM_REPO_DIR}" commit -m "chore: initial npm demo" >/dev/null
+
+NPM_RELEASE_OUTPUT="$(
+  cd "${NPM_REPO_DIR}" >/dev/null
+  "${ROOT}/bin/git-vibe" release 0.2.0
+)"
+[[ "${NPM_RELEASE_OUTPUT}" == *"Versioning: npm"* ]] || fail "release did not report npm versioning"
+[[ "${NPM_RELEASE_OUTPUT}" == *"Updated npm files: package.json, package-lock.json"* ]] || fail "release did not report the updated npm files"
+[[ "$(cd "${NPM_REPO_DIR}" && node -p "require('./package.json').version")" == "0.2.0" ]] || fail "npm versioning did not update package.json"
+[[ "$(cd "${NPM_REPO_DIR}" && node -e "const lock=JSON.parse(require('fs').readFileSync('package-lock.json','utf8')); process.stdout.write(lock.version)")" == "0.2.0" ]] || fail "npm versioning did not update package-lock.json"
+[[ "$(cd "${NPM_REPO_DIR}" && node -e "const lock=JSON.parse(require('fs').readFileSync('package-lock.json','utf8')); process.stdout.write(lock.packages[''].version)")" == "0.2.0" ]] || fail "npm versioning did not update the root package entry in package-lock.json"
+
+printf 'smoke: npm release versioning ok\n'
 
 SMOKE_CODE_OUTPUT="$(
   cd "${REPO_DIR}" >/dev/null
@@ -751,11 +798,13 @@ git -C "${REPO_DIR}" config --unset vibe.openEditor
 
 printf 'smoke: editor modes ok\n'
 
-(
-  cd "${REPO_DIR}" >/dev/null
-  "${ROOT}/bin/git-vibe" ship 0.1.0 --push >/dev/null
-)
+git -C "${REPO_DIR}" config vibe.releaseVersioning none
 
+RELEASE_NONE_OUTPUT="$(
+  cd "${REPO_DIR}" >/dev/null
+  "${ROOT}/bin/git-vibe" ship 0.1.0 --push
+)"
+[[ "${RELEASE_NONE_OUTPUT}" == *"Versioning: none"* ]] || fail "release did not report explicit none versioning"
 [[ "$(git -C "${REPO_DIR}" log -1 --pretty=%s)" == "chore(release): v0.1.0" ]] || fail "release did not create the expected commit"
 [[ "$(git -C "${REPO_DIR}" tag --list "v0.1.0")" == "v0.1.0" ]] || fail "release did not create the expected tag"
 [[ ! -f "${REPO_DIR}/VERSION" ]] || fail "release unexpectedly created VERSION"
@@ -763,16 +812,18 @@ git --git-dir="${ORIGIN_DIR}" show-ref --verify --quiet refs/tags/v0.1.0 || fail
 [[ "$(git -C "${REPO_DIR}" rev-parse HEAD)" == "$(git --git-dir="${ORIGIN_DIR}" rev-parse refs/heads/main)" ]] || fail "release --push did not push main"
 
 printf 'smoke: release ok\n'
+git -C "${REPO_DIR}" config --unset vibe.releaseVersioning
 
 printf '0.1.0\n' > "${REPO_DIR}/VERSION"
 git -C "${REPO_DIR}" add VERSION
 VIBE_ALLOW_COMMIT_BASE=1 git -C "${REPO_DIR}" commit -m "chore: add version file" >/dev/null
 
-(
+FILE_RELEASE_OUTPUT="$(
   cd "${REPO_DIR}" >/dev/null
-  "${ROOT}/bin/git-vibe" release 0.2.0 --push >/dev/null
-)
+  "${ROOT}/bin/git-vibe" release 0.2.0 --push
+)"
 
+[[ "${FILE_RELEASE_OUTPUT}" == *"Versioning: file"* ]] || fail "release did not report file versioning when VERSION exists"
 [[ "$(<"${REPO_DIR}/VERSION")" == "0.2.0" ]] || fail "release did not update VERSION"
 [[ "$(git -C "${REPO_DIR}" log -1 --pretty=%s)" == "chore(release): v0.2.0" ]] || fail "release did not create the expected commit with VERSION present"
 [[ "$(git -C "${REPO_DIR}" tag --list "v0.2.0")" == "v0.2.0" ]] || fail "release did not create the expected tag with VERSION present"

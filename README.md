@@ -333,7 +333,7 @@ Git Vibe treats an already deleted remote branch as a successful no-op, so the f
 
 ### `git vibe release <version> [--push]`
 
-Cuts a release directly from `main`. Git Vibe creates a `chore(release): vX.Y.Z` commit on `main` and adds an annotated `vX.Y.Z` tag. If the repo already has a top-level `VERSION` file, or you configure `vibe.releaseVersionFile`, Git Vibe updates that plain-text file too.
+Cuts a release directly from `main`. Git Vibe creates a `chore(release): vX.Y.Z` commit on `main` and adds an annotated `vX.Y.Z` tag. Version file updates are controlled by the repo's configured release versioning mode, which can be `none`, `file`, or `npm`.
 
 Example:
 
@@ -348,7 +348,7 @@ The command is intentionally narrow:
 - it must be run from `main`
 - the working tree must be clean
 - it creates the commit and tag locally
-- it only auto-updates plain-text version files
+- it only updates version files when the repo opts into a supported versioning mode
 
 If you want Git Vibe to push the release for you, use:
 
@@ -464,7 +464,10 @@ openEditor = "auto"
 openWorkspaceWith = "auto"
 deleteRemoteOnFinish = true
 issueBranchStyle = "number-and-title"
-releaseVersionFile = "VERSION"
+
+[release]
+versioning = "file"
+file = "VERSION"
 
 [hooks]
 post-create = "npm install"
@@ -481,7 +484,11 @@ Supported `[vibe]` keys:
 - `openWorkspaceWith`
 - `deleteRemoteOnFinish`
 - `issueBranchStyle`
-- `releaseVersionFile`
+
+Supported `[release]` keys:
+
+- `versioning`
+- `file`
 
 Use Git config for personal defaults or one-off repo overrides when you do not want to commit a shared setting.
 
@@ -539,10 +546,30 @@ git config vibe.disallowPushOnBase true
 Release command example:
 
 ```bash
-git config vibe.releaseVersionFile VERSION
+git config vibe.releaseVersioning npm
 ```
 
-`git vibe release` only auto-manages plain-text version files containing the version string by itself. If your project keeps its version in `package.json` or somewhere else, bump that file yourself before cutting the release. Without this config, Git Vibe auto-updates a top-level `VERSION` file when one already exists and otherwise skips version-file changes.
+Supported release versioning modes are:
+
+- `none` to leave version files alone and only create the release commit and tag
+- `file` to update a plain-text version file like `VERSION`
+- `npm` to update `package.json` and any existing npm lockfile
+
+Examples:
+
+```bash
+git config vibe.releaseVersioning none
+git config vibe.releaseVersioning file
+git config vibe.releaseFile VERSION
+git config vibe.releaseVersioning npm
+```
+
+```toml
+[release]
+versioning = "npm"
+```
+
+`git vibe release` still defaults to the simple path for plain `VERSION` file repos: if a top-level `VERSION` file already exists, Git Vibe treats that as `versioning = "file"` automatically. Otherwise it defaults to `none` unless you configure another mode.
 
 Lifecycle hooks live in the `[hooks]` section of `vibe.toml` and run through `sh -c`.
 
@@ -582,7 +609,7 @@ git pull --ff-only origin main
 git vibe release 0.0.2 --push
 ```
 
-Under the hood, `git vibe release 0.0.2 --push` creates `chore(release): v0.0.2`, creates the annotated tag `v0.0.2` on `main`, and pushes both `main` and the tag to `origin`. If Git Vibe is managing a plain-text version file for that repo, it writes `0.0.2` there first.
+Under the hood, `git vibe release 0.0.2 --push` creates `chore(release): v0.0.2`, creates the annotated tag `v0.0.2` on `main`, and pushes both `main` and the tag to `origin`. If Git Vibe is managing versioning for that repo, it updates the configured files first.
 
 ## Development
 
