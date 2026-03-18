@@ -10,6 +10,7 @@ WORKTREE_DIR="${TMP_DIR}/.vibe/demo/smoke-test"
 WORKTREE_FINISH_DIR="${TMP_DIR}/.vibe/demo/worktree-finish"
 ISSUE_WORKTREE_DIR="${TMP_DIR}/.vibe/demo/9-issue-aware-vibe-creation"
 TITLE_ONLY_ISSUE_WORKTREE_DIR="${TMP_DIR}/.vibe/demo/issue-title-only-branch"
+SESSION_WORKTREE_DIR="${TMP_DIR}/.vibe/demo/session-demo"
 DOCTOR_DIRTY_WORKTREE_DIR="${TMP_DIR}/.vibe/demo/doctor-dirty"
 DOCTOR_STALE_WORKTREE_DIR="${TMP_DIR}/.vibe/demo/doctor-stale"
 REMOTE_DELETE_WORKTREE_DIR="${TMP_DIR}/.vibe/demo/remote-delete"
@@ -388,6 +389,75 @@ git -C "${REPO_DIR}" config --unset vibe.issueBranchStyle
 git -C "${REPO_DIR}" config --unset vibe.deleteRemoteOnFinish
 
 printf 'smoke: issue flow ok\n'
+
+SESSION_CODE_OUTPUT="$(
+  cd "${REPO_DIR}" >/dev/null
+  "${ROOT}/bin/git-vibe" code --agent codex --task "Fix login redirect" session-demo
+)"
+[[ -d "${SESSION_WORKTREE_DIR}" ]] || fail "session worktree was not created"
+[[ "${SESSION_CODE_OUTPUT}" == *"Session: codex"* ]] || fail "code did not print the recorded session agent"
+[[ "${SESSION_CODE_OUTPUT}" == *"Task: Fix login redirect"* ]] || fail "code did not print the recorded session task"
+[[ "$(git -C "${REPO_DIR}" config --get vibe.session.session-demo.agent)" == "codex" ]] || fail "code did not store the session agent"
+[[ "$(git -C "${REPO_DIR}" config --get vibe.session.session-demo.task)" == "Fix login redirect" ]] || fail "code did not store the session task"
+[[ -n "$(git -C "${REPO_DIR}" config --get vibe.session.session-demo.updatedAt)" ]] || fail "code did not record session activity"
+
+SESSION_LIST_OUTPUT="$(
+  cd "${REPO_DIR}" >/dev/null
+  "${ROOT}/bin/git-vibe" list
+)"
+[[ "${SESSION_LIST_OUTPUT}" == *"SESSION"* ]] || fail "list did not print the session column"
+[[ "${SESSION_LIST_OUTPUT}" == *"codex: Fix login redirect"* ]] || fail "list did not summarize the session metadata"
+
+SESSION_STATUS_OUTPUT="$(
+  cd "${REPO_DIR}" >/dev/null
+  "${ROOT}/bin/git-vibe" check session-demo
+)"
+[[ "${SESSION_STATUS_OUTPUT}" == *"Session: codex"* ]] || fail "check did not show the session agent"
+[[ "${SESSION_STATUS_OUTPUT}" == *"Last activity:"* ]] || fail "check did not show session activity"
+
+SESSION_UPDATE_OUTPUT="$(
+  cd "${REPO_DIR}" >/dev/null
+  "${ROOT}/bin/git-vibe" session --task "Refine login redirect flow" session-demo
+)"
+[[ "${SESSION_UPDATE_OUTPUT}" == *"Updated session for feat/session-demo"* ]] || fail "session did not report the update"
+[[ "${SESSION_UPDATE_OUTPUT}" == *"Task: Refine login redirect flow"* ]] || fail "session did not print the updated task"
+[[ "$(git -C "${REPO_DIR}" config --get vibe.session.session-demo.task)" == "Refine login redirect flow" ]] || fail "session did not persist the updated task"
+
+SESSION_SHOW_OUTPUT="$(
+  cd "${REPO_DIR}" >/dev/null
+  "${ROOT}/bin/git-vibe" session session-demo
+)"
+[[ "${SESSION_SHOW_OUTPUT}" == *"Session for feat/session-demo:"* ]] || fail "session did not show the current metadata"
+[[ "${SESSION_SHOW_OUTPUT}" == *"Task: Refine login redirect flow"* ]] || fail "session did not show the persisted task"
+
+SESSION_ENTER_OUTPUT="$(
+  cd "${REPO_DIR}" >/dev/null
+  "${ROOT}/bin/git-vibe" enter session-demo
+)"
+[[ "${SESSION_ENTER_OUTPUT}" == *"Session: codex"* ]] || fail "enter did not surface the session agent"
+[[ "${SESSION_ENTER_OUTPUT}" == *"Task: Refine login redirect flow"* ]] || fail "enter did not surface the session task"
+
+printf '\nSession change\n' >> "${SESSION_WORKTREE_DIR}/README.md"
+git -C "${SESSION_WORKTREE_DIR}" add README.md
+git -C "${SESSION_WORKTREE_DIR}" commit -m "feat: update readme from session vibe" >/dev/null
+
+SESSION_FINISH_OUTPUT="$(
+  cd "${REPO_DIR}" >/dev/null
+  "${ROOT}/bin/git-vibe" finish --local session-demo
+)"
+[[ "${SESSION_FINISH_OUTPUT}" == *"Finished feat/session-demo"* ]] || fail "finish did not close the session vibe"
+[[ ! -d "${SESSION_WORKTREE_DIR}" ]] || fail "finish did not remove the session worktree"
+if git -C "${REPO_DIR}" config --get vibe.session.session-demo.agent >/dev/null 2>&1; then
+  fail "finish did not clear the session agent metadata"
+fi
+if git -C "${REPO_DIR}" config --get vibe.session.session-demo.task >/dev/null 2>&1; then
+  fail "finish did not clear the session task metadata"
+fi
+if git -C "${REPO_DIR}" config --get vibe.session.session-demo.updatedAt >/dev/null 2>&1; then
+  fail "finish did not clear the session activity metadata"
+fi
+
+printf 'smoke: session flow ok\n'
 
 (
   cd "${REPO_DIR}" >/dev/null

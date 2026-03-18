@@ -39,6 +39,12 @@ Open a vibe:
 git vibe code <name>
 ```
 
+Attach agent session context while you open it:
+
+```bash
+git vibe code --agent codex --task "fix login redirect" <name>
+```
+
 Open a vibe directly from a GitHub issue:
 
 ```bash
@@ -69,6 +75,13 @@ Reopen an existing vibe in Codex Desktop or VS Code:
 
 ```bash
 git vibe open <name>
+```
+
+Inspect or update vibe session metadata:
+
+```bash
+git vibe session <name>
+git vibe session --task "polish pricing copy" <name>
 ```
 
 Inspect a vibe diff:
@@ -137,7 +150,7 @@ List active vibes:
 git vibe list
 ```
 
-`git vibe list` should act like a control tower for the repo. It should show active vibe branches, worktree state like `clean`, `dirty`, `locked`, or `prunable`, ahead/behind against the base branch, and a short change summary.
+`git vibe list` should act like a control tower for the repo. It should show active vibe branches, worktree state like `clean`, `dirty`, `locked`, or `prunable`, ahead/behind against the base branch, lightweight session context when present, and a short change summary.
 
 Show vibe status:
 
@@ -145,7 +158,7 @@ Show vibe status:
 git vibe status
 ```
 
-`git vibe status` or `git vibe check` should stay useful both from `main` and from inside a vibe worktree. When run inside a vibe, the reported vibe root should still point at the shared repo-level worktree area, not a nested path under the current worktree.
+`git vibe status` or `git vibe check` should stay useful both from `main` and from inside a vibe worktree. When run inside a vibe, the reported vibe root should still point at the shared repo-level worktree area, not a nested path under the current worktree. If a vibe has saved session metadata, status should surface the agent label, task, and last activity clearly enough that a human can resume the lane without guessing.
 
 Show the path for a vibe:
 
@@ -217,6 +230,13 @@ The release command creates `chore(release): vX.Y.Z` on `main`, adds the annotat
 Keep `auto` as the default. It works offline, it does not force a network call, and it does not silently merge into `main`. Use `--sync` when you want fresh remote knowledge and `--local` when you want Git Vibe to perform the merge itself.
 
 Use `git vibe finish` when the branch lifecycle is complete. Use `git vibe doctor` when the branch is still active but the worktree metadata looks stale, missing, prunable, or otherwise unhealthy. Use raw `git vibe prune` as the lower-level cleanup command when you already know you just want to drop stale metadata.
+
+Agent-aware metadata should stay lightweight and local-first:
+
+- record session context with `git vibe code --agent/--task ...` or `git vibe session ...`
+- show it in `list`, `status`, `check`, `enter`, and `open`
+- update last activity when a user returns to a vibe
+- clear the metadata automatically when the vibe is finished
 
 Remote cleanup should stay safe and boring:
 
