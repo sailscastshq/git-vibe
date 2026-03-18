@@ -316,10 +316,17 @@ Run it with no name from inside a feature worktree to finish the current vibe.
 
 Use `finish` when the branch lifecycle is complete. Use `doctor` or `prune` when the branch is still open but the worktree metadata got out of sync.
 
-If you want remote cleanup to happen by default in this repo, set:
+If you want remote cleanup to happen by default in this repo, set it in local Git config:
 
 ```bash
 git config vibe.deleteRemoteOnFinish true
+```
+
+Or share it in the repo's `vibe.toml`:
+
+```toml
+[vibe]
+deleteRemoteOnFinish = true
 ```
 
 Git Vibe treats an already deleted remote branch as a successful no-op, so the finish flow still completes cleanly when GitHub or another maintainer already removed it.
@@ -361,7 +368,7 @@ Lists active feature worktrees for the current repository, including each vibe's
 
 ### `git vibe status [name]`
 
-Shows the current repository, base branch, branch prefix, worktree root, and active vibes. When run inside a vibe worktree, or when you pass a vibe name, it also prints a focused workspace summary for that vibe, including session metadata, linked PR state, and a checks summary when available through `gh`.
+Shows the current repository, checked-in repo config path, base branch, branch prefix, worktree root, configured lifecycle hooks, and active vibes. When run inside a vibe worktree, or when you pass a vibe name, it also prints a focused workspace summary for that vibe, including session metadata, linked PR state, and a checks summary when available through `gh`.
 
 ### `git vibe check [name]`
 
@@ -437,7 +444,46 @@ VIBE_ALLOW_PUSH_BASE=1 git push origin main
 
 ## Configuration
 
-Git Vibe reads from Git config so you can keep global defaults and still override per repo.
+Git Vibe reads configuration in this order:
+
+1. local repo Git config like `git config vibe.worktreeRoot ../worktrees`
+2. checked-in `vibe.toml` at the repo root
+3. global Git config like `git config --global vibe.worktreeRoot ../.vibe`
+4. built-in defaults
+
+That makes `vibe.toml` the team-shared source of truth while still letting each developer keep personal overrides locally.
+
+Example `vibe.toml`:
+
+```toml
+[vibe]
+baseBranch = "main"
+branchPrefix = "feat/"
+worktreeRoot = "../.vibe"
+openEditor = "auto"
+openWorkspaceWith = "auto"
+deleteRemoteOnFinish = true
+issueBranchStyle = "number-and-title"
+releaseVersionFile = "VERSION"
+
+[hooks]
+post-create = "npm install"
+pre-finish = "npm test"
+pre-release = "npm test"
+```
+
+Supported `[vibe]` keys:
+
+- `baseBranch`
+- `branchPrefix`
+- `worktreeRoot`
+- `openEditor`
+- `openWorkspaceWith`
+- `deleteRemoteOnFinish`
+- `issueBranchStyle`
+- `releaseVersionFile`
+
+Use Git config for personal defaults or one-off repo overrides when you do not want to commit a shared setting.
 
 Global defaults:
 
@@ -497,6 +543,24 @@ git config vibe.releaseVersionFile VERSION
 ```
 
 `git vibe release` only auto-manages plain-text version files containing the version string by itself. If your project keeps its version in `package.json` or somewhere else, bump that file yourself before cutting the release. Without this config, Git Vibe auto-updates a top-level `VERSION` file when one already exists and otherwise skips version-file changes.
+
+Lifecycle hooks live in the `[hooks]` section of `vibe.toml` and run through `sh -c`.
+
+- `post-create` runs after Git Vibe creates, attaches, or checks out a new worktree and before it prints the final workspace context
+- `pre-finish` runs after merge verification succeeds and before Git Vibe deletes the worktree or branch
+- `pre-release` runs after release validation passes and before Git Vibe updates the version file, commits, or tags
+
+Each hook receives these environment variables:
+
+- `GIT_VIBE_HOOK`
+- `GIT_VIBE_REPO_ROOT`
+- `GIT_VIBE_BASE_BRANCH`
+- `GIT_VIBE_BRANCH`
+- `GIT_VIBE_WORKTREE_PATH`
+- `GIT_VIBE_VERSION`
+- `GIT_VIBE_ISSUE_NUMBER`
+
+Hooks are opt-in and repo-local. If a hook exits non-zero, Git Vibe stops the command instead of continuing with cleanup or release mutation.
 
 ## Release and tagging
 

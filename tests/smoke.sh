@@ -2,11 +2,16 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-TMP_DIR="$(mktemp -d)"
+TMP_DIR="$(cd "$(mktemp -d)" && pwd -P)"
 REPO_DIR="${TMP_DIR}/demo"
+CONFIG_REPO_DIR="${TMP_DIR}/config-demo"
 ORIGIN_DIR="${TMP_DIR}/origin.git"
+CONFIG_GLOBAL_FILE="${TMP_DIR}/config-global.gitconfig"
 HOOKS_DIR="${TMP_DIR}/hooks"
+CONFIG_HOOK_LOG="${TMP_DIR}/config-hooks.log"
+CONFIG_HOOK_RECORDER="${TMP_DIR}/record-vibe-hook.sh"
 WORKTREE_DIR="${TMP_DIR}/.vibe/demo/smoke-test"
+CONFIG_WORKTREE_DIR="${TMP_DIR}/repo-vibes/config-demo/repo-config-demo"
 WORKTREE_FINISH_DIR="${TMP_DIR}/.vibe/demo/worktree-finish"
 ISSUE_WORKTREE_DIR="${TMP_DIR}/.vibe/demo/9-issue-aware-vibe-creation"
 TITLE_ONLY_ISSUE_WORKTREE_DIR="${TMP_DIR}/.vibe/demo/issue-title-only-branch"
@@ -66,6 +71,23 @@ cat > "${FAKE_BIN_DIR}/codex" <<EOF
 printf '%s\n' "\$*" >> "${CODEX_LOG}"
 EOF
 chmod +x "${FAKE_BIN_DIR}/codex"
+
+cat > "${CONFIG_HOOK_RECORDER}" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+
+printf '%s|%s|%s|%s|%s\n' \
+  "\${GIT_VIBE_HOOK:-}" \
+  "\${GIT_VIBE_BRANCH:-}" \
+  "\${GIT_VIBE_WORKTREE_PATH:-}" \
+  "\${GIT_VIBE_VERSION:-}" \
+  "\${GIT_VIBE_ISSUE_NUMBER:-}" >> "${CONFIG_HOOK_LOG}"
+
+if [ "\${GIT_VIBE_HOOK:-}" = "post-create" ] && [ -n "\${GIT_VIBE_WORKTREE_PATH:-}" ]; then
+  printf 'hooked\n' > "\${GIT_VIBE_WORKTREE_PATH}/.vibe-hook-created"
+fi
+EOF
+chmod +x "${CONFIG_HOOK_RECORDER}"
 
 cat > "${FAKE_BIN_DIR}/gh" <<EOF
 #!/usr/bin/env bash
@@ -224,6 +246,101 @@ git -C "${REPO_DIR}" config vibe.branchPrefix feat/
 git -C "${REPO_DIR}" config vibe.worktreeRoot ../.vibe
 git -C "${REPO_DIR}" config vibe.disallowPushOnBase false
 git -C "${REPO_DIR}" push -u origin main >/dev/null
+
+git init "${CONFIG_REPO_DIR}" >/dev/null
+git -C "${CONFIG_REPO_DIR}" config user.name "Git Vibe Smoke"
+git -C "${CONFIG_REPO_DIR}" config user.email "smoke@example.com"
+git -C "${CONFIG_REPO_DIR}" config core.hooksPath "${HOOKS_DIR}"
+git -C "${CONFIG_REPO_DIR}" switch -c main >/dev/null
+
+printf '# Config Demo\n' > "${CONFIG_REPO_DIR}/README.md"
+printf '0.0.0\n' > "${CONFIG_REPO_DIR}/VERSION"
+cat > "${CONFIG_REPO_DIR}/vibe.toml" <<EOF
+[vibe]
+worktreeRoot = "../repo-vibes"
+openEditor = "never"
+openWorkspaceWith = "vscode"
+deleteRemoteOnFinish = true
+issueBranchStyle = "number-only"
+releaseVersionFile = "VERSION"
+
+[hooks]
+post-create = "${CONFIG_HOOK_RECORDER}"
+pre-finish = "${CONFIG_HOOK_RECORDER}"
+pre-release = "${CONFIG_HOOK_RECORDER}"
+EOF
+git -C "${CONFIG_REPO_DIR}" add README.md VERSION vibe.toml
+VIBE_ALLOW_COMMIT_BASE=1 git -C "${CONFIG_REPO_DIR}" commit -m "chore: initial config demo" >/dev/null
+
+git config --file "${CONFIG_GLOBAL_FILE}" vibe.worktreeRoot ../global-vibes
+git config --file "${CONFIG_GLOBAL_FILE}" vibe.openEditor always
+git config --file "${CONFIG_GLOBAL_FILE}" vibe.deleteRemoteOnFinish false
+
+CONFIG_STATUS_OUTPUT="$(
+  cd "${CONFIG_REPO_DIR}" >/dev/null
+  GIT_CONFIG_GLOBAL="${CONFIG_GLOBAL_FILE}" "${ROOT}/bin/git-vibe" check
+)"
+[[ "${CONFIG_STATUS_OUTPUT}" == *"Repo config: ${CONFIG_REPO_DIR}/vibe.toml"* ]] || fail "check did not show the checked-in vibe.toml path"
+[[ "${CONFIG_STATUS_OUTPUT}" == *"Vibe root: ${TMP_DIR}/repo-vibes/config-demo"* ]] || fail "repo vibe.toml should override the global worktree root"
+[[ "${CONFIG_STATUS_OUTPUT}" == *"Open editor: never"* ]] || fail "repo vibe.toml should override the global openEditor setting"
+[[ "${CONFIG_STATUS_OUTPUT}" == *"Delete remote on finish: true"* ]] || fail "repo vibe.toml should override the global deleteRemoteOnFinish setting"
+[[ "${CONFIG_STATUS_OUTPUT}" == *"Hooks: post-create, pre-finish, pre-release"* ]] || fail "check did not summarize the configured lifecycle hooks"
+
+git -C "${CONFIG_REPO_DIR}" config vibe.worktreeRoot ../local-vibes
+git -C "${CONFIG_REPO_DIR}" config vibe.openEditor auto
+git -C "${CONFIG_REPO_DIR}" config vibe.deleteRemoteOnFinish false
+
+CONFIG_LOCAL_OVERRIDE_OUTPUT="$(
+  cd "${CONFIG_REPO_DIR}" >/dev/null
+  GIT_CONFIG_GLOBAL="${CONFIG_GLOBAL_FILE}" "${ROOT}/bin/git-vibe" check
+)"
+[[ "${CONFIG_LOCAL_OVERRIDE_OUTPUT}" == *"Vibe root: ${TMP_DIR}/local-vibes/config-demo"* ]] || fail "local git config should override the checked-in vibe.toml worktree root"
+[[ "${CONFIG_LOCAL_OVERRIDE_OUTPUT}" == *"Open editor: auto"* ]] || fail "local git config should override the checked-in vibe.toml openEditor setting"
+[[ "${CONFIG_LOCAL_OVERRIDE_OUTPUT}" == *"Delete remote on finish: false"* ]] || fail "local git config should override the checked-in vibe.toml deleteRemoteOnFinish setting"
+
+git -C "${CONFIG_REPO_DIR}" config --unset vibe.worktreeRoot
+git -C "${CONFIG_REPO_DIR}" config --unset vibe.openEditor
+git -C "${CONFIG_REPO_DIR}" config --unset vibe.deleteRemoteOnFinish
+
+: > "${CONFIG_HOOK_LOG}"
+
+CONFIG_CODE_OUTPUT="$(
+  cd "${CONFIG_REPO_DIR}" >/dev/null
+  GIT_CONFIG_GLOBAL="${CONFIG_GLOBAL_FILE}" "${ROOT}/bin/git-vibe" code repo-config-demo
+)"
+[[ -d "${CONFIG_WORKTREE_DIR}" ]] || fail "repo vibe.toml did not create the expected worktree"
+[[ -f "${CONFIG_WORKTREE_DIR}/.vibe-hook-created" ]] || fail "post-create hook did not run its setup task"
+[[ "${CONFIG_CODE_OUTPUT}" == *"Hook: ran post-create"* ]] || fail "code did not report the post-create hook"
+[[ "$(<"${CONFIG_HOOK_LOG}")" == *"post-create|feat/repo-config-demo|${CONFIG_WORKTREE_DIR}||"* ]] || fail "post-create hook did not receive the expected branch and worktree context"
+
+CONFIG_REOPEN_OUTPUT="$(
+  cd "${CONFIG_REPO_DIR}" >/dev/null
+  GIT_CONFIG_GLOBAL="${CONFIG_GLOBAL_FILE}" "${ROOT}/bin/git-vibe" code repo-config-demo
+)"
+[[ "${CONFIG_REOPEN_OUTPUT}" == *"Opened feat/repo-config-demo"* ]] || fail "code did not reopen the existing config demo vibe"
+[[ "$(grep -c '^post-create|' "${CONFIG_HOOK_LOG}")" == "1" ]] || fail "post-create hook should not rerun when reopening an existing vibe"
+
+printf '\nConfig hook change\n' >> "${CONFIG_WORKTREE_DIR}/README.md"
+git -C "${CONFIG_WORKTREE_DIR}" add README.md .vibe-hook-created
+git -C "${CONFIG_WORKTREE_DIR}" commit -m "feat: update readme for config hook" >/dev/null
+
+CONFIG_FINISH_OUTPUT="$(
+  cd "${CONFIG_REPO_DIR}" >/dev/null
+  GIT_CONFIG_GLOBAL="${CONFIG_GLOBAL_FILE}" "${ROOT}/bin/git-vibe" finish --local repo-config-demo
+)"
+[[ "${CONFIG_FINISH_OUTPUT}" == *"Hook: ran pre-finish"* ]] || fail "finish did not report the pre-finish hook"
+[[ "$(<"${CONFIG_HOOK_LOG}")" == *"pre-finish|feat/repo-config-demo|${CONFIG_WORKTREE_DIR}||"* ]] || fail "pre-finish hook did not receive the expected branch and worktree context"
+[[ ! -d "${CONFIG_WORKTREE_DIR}" ]] || fail "finish did not remove the config demo worktree"
+
+CONFIG_RELEASE_OUTPUT="$(
+  cd "${CONFIG_REPO_DIR}" >/dev/null
+  GIT_CONFIG_GLOBAL="${CONFIG_GLOBAL_FILE}" "${ROOT}/bin/git-vibe" release 1.2.3
+)"
+[[ "${CONFIG_RELEASE_OUTPUT}" == *"Hook: ran pre-release"* ]] || fail "release did not report the pre-release hook"
+[[ "$(<"${CONFIG_HOOK_LOG}")" == *"pre-release|main|${CONFIG_REPO_DIR}|1.2.3|"* ]] || fail "pre-release hook did not receive the expected release context"
+[[ "$(<"${CONFIG_REPO_DIR}/VERSION")" == "1.2.3" ]] || fail "release did not honor vibe.toml releaseVersionFile"
+
+printf 'smoke: repo config and hooks ok\n'
 
 SMOKE_CODE_OUTPUT="$(
   cd "${REPO_DIR}" >/dev/null

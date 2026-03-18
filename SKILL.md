@@ -63,6 +63,15 @@ Workspace launch follows `vibe.openEditor=auto|always|never`. The default is `au
 
 Issue-driven vibes use `gh issue view` to build deterministic branch names. `vibe.issueBranchStyle=number-and-title|number-only|title-only` controls the naming shape, and Git Vibe remembers the issue-to-branch mapping locally so later issue-title edits do not break reopen flows.
 
+Shared repo defaults should live in a checked-in `vibe.toml`, not only in ad hoc local Git config. The precedence should be:
+
+1. local repo Git config
+2. repo-root `vibe.toml`
+3. global Git config
+4. built-in defaults
+
+Keep the `vibe.toml` format intentionally small. Git Vibe only needs straightforward scalar settings under `[vibe]` plus lifecycle commands under `[hooks]`.
+
 PR-driven handoff uses `gh pr create`, `gh pr view`, and `gh pr checks` so the workflow stays GitHub-native. `git vibe check` should surface PR/check summary when available, and `git vibe checks` should let users inspect the individual checks without leaving the vibe flow.
 
 Jump back into an existing vibe:
@@ -225,7 +234,7 @@ The release command creates `chore(release): vX.Y.Z` on `main`, adds the annotat
 - `git vibe finish <name>` is the default auto mode. It checks whether the vibe is already merged into local `main` or your current `origin/main` refs, then cleans up if it is.
 - `git vibe finish --sync <name>` fetches `origin/main` first, then runs the same merge check. Use this after a PR was merged on GitHub and your local refs may be stale.
 - `git vibe finish --local <name>` merges the vibe into local `main` with `--ff-only`, then cleans up.
-- `git vibe finish --delete-remote <name>` also deletes `origin/<branch>` after merge verification. If `vibe.deleteRemoteOnFinish=true`, that remote cleanup becomes the repo default unless the user passes `--keep-remote`.
+- `git vibe finish --delete-remote <name>` also deletes `origin/<branch>` after merge verification. If `vibe.deleteRemoteOnFinish=true` in `vibe.toml` or local Git config, that remote cleanup becomes the repo default unless the user passes `--keep-remote`.
 
 Keep `auto` as the default. It works offline, it does not force a network call, and it does not silently merge into `main`. Use `--sync` when you want fresh remote knowledge and `--local` when you want Git Vibe to perform the merge itself.
 
@@ -242,7 +251,14 @@ Remote cleanup should stay safe and boring:
 
 - deleting a remote feature branch should only happen after merge verification succeeds
 - an already deleted remote branch should be treated as a successful no-op
-- `git vibe status` should show whether `vibe.deleteRemoteOnFinish` is enabled for the repo
+- `git vibe status` should show whether `vibe.deleteRemoteOnFinish` is enabled for the repo, plus the active `vibe.toml` path and configured lifecycle hooks
+
+Lifecycle hooks should stay explicit and narrow:
+
+- `post-create` is for setup after a brand-new vibe worktree is created, attached, or checked out
+- `pre-finish` is for validation or cleanup just before Git Vibe removes the worktree and branch
+- `pre-release` is for checks that must pass before Git Vibe mutates the version file, creates the release commit, or tags
+- hooks should be optional, repo-local, and abort the command when they fail
 
 ## Install
 

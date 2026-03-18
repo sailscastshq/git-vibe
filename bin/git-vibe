@@ -53,39 +53,226 @@ git_config_get() {
   git config --get "$1" 2>/dev/null || true
 }
 
+git_local_config_get() {
+  git config --local --get "$1" 2>/dev/null || true
+}
+
+git_global_config_get() {
+  git config --global --get "$1" 2>/dev/null || true
+}
+
+git_bool_config_get() {
+  git config --bool --get "$1" 2>/dev/null || true
+}
+
+git_local_bool_config_get() {
+  git config --bool --local --get "$1" 2>/dev/null || true
+}
+
+git_global_bool_config_get() {
+  git config --bool --global --get "$1" 2>/dev/null || true
+}
+
+trim_whitespace() {
+  printf '%s' "$1" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//'
+}
+
+repo_vibe_config_path() {
+  local path
+  path="$(primary_repo_root)/vibe.toml"
+  [[ -f "${path}" ]] || return 1
+  printf '%s\n' "${path}"
+}
+
+parse_toml_scalar() {
+  local raw value
+  raw="$(trim_whitespace "$1")"
+
+  if [[ "${raw}" == \"*\" && "${raw}" == *\" ]]; then
+    value="${raw:1:$(( ${#raw} - 2 ))}"
+    value="${value//\\\"/\"}"
+    value="${value//\\\\/\\}"
+    printf '%s\n' "${value}"
+    return 0
+  fi
+
+  if [[ "${raw}" == \'*\' && "${raw}" == *\' ]]; then
+    printf '%s\n' "${raw:1:$(( ${#raw} - 2 ))}"
+    return 0
+  fi
+
+  printf '%s\n' "${raw}"
+}
+
+repo_toml_get() {
+  local section key path current_section line trimmed lhs rhs
+  section="$1"
+  key="$2"
+  path="$(repo_vibe_config_path || true)"
+  [[ -n "${path}" ]] || return 1
+  current_section=""
+
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    line="${line%$'\r'}"
+    trimmed="$(trim_whitespace "${line}")"
+    [[ -z "${trimmed}" || "${trimmed}" == \#* ]] && continue
+
+    if [[ "${trimmed}" == \[*\] ]]; then
+      current_section="${trimmed#\[}"
+      current_section="${current_section%\]}"
+      current_section="$(trim_whitespace "${current_section}")"
+      continue
+    fi
+
+    [[ "${current_section}" == "${section}" ]] || continue
+    [[ "${trimmed}" == *"="* ]] || continue
+
+    lhs="$(trim_whitespace "${trimmed%%=*}")"
+    rhs="$(trim_whitespace "${trimmed#*=}")"
+    [[ "${lhs}" == "${key}" ]] || continue
+
+    parse_toml_scalar "${rhs}"
+    return 0
+  done < "${path}"
+
+  return 1
+}
+
+shared_setting_get() {
+  local git_key section key configured
+  git_key="$1"
+  section="$2"
+  key="$3"
+
+  configured="$(git_local_config_get "${git_key}")"
+  if [[ -n "${configured}" ]]; then
+    printf '%s\n' "${configured}"
+    return 0
+  fi
+
+  configured="$(repo_toml_get "${section}" "${key}" || true)"
+  if [[ -n "${configured}" ]]; then
+    printf '%s\n' "${configured}"
+    return 0
+  fi
+
+  git_global_config_get "${git_key}" || true
+}
+
+shared_bool_setting_get() {
+  local git_key section key configured
+  git_key="$1"
+  section="$2"
+  key="$3"
+
+  configured="$(git_local_bool_config_get "${git_key}")"
+  if [[ -n "${configured}" ]]; then
+    printf '%s\n' "${configured}"
+    return 0
+  fi
+
+  configured="$(repo_toml_get "${section}" "${key}" || true)"
+  if [[ -n "${configured}" ]]; then
+    printf '%s\n' "${configured}"
+    return 0
+  fi
+
+  git_global_bool_config_get "${git_key}" || true
+}
+
+configured_hook_command() {
+  repo_toml_get "hooks" "$1" || true
+}
+
+configured_hooks_summary() {
+  local hook command summary
+  local -a hooks
+  hooks=()
+
+  for hook in post-create pre-finish pre-release; do
+    command="$(configured_hook_command "${hook}")"
+    if [[ -n "${command}" ]]; then
+      hooks+=("${hook}")
+    fi
+  done
+
+  if [[ ${#hooks[@]} -eq 0 ]]; then
+    printf '%s\n' "none"
+  else
+    summary=""
+    for hook in "${hooks[@]}"; do
+      if [[ -n "${summary}" ]]; then
+        summary="${summary}, "
+      fi
+      summary="${summary}${hook}"
+    done
+    printf '%s\n' "${summary}"
+  fi
+}
+
+run_configured_hook() {
+  local hook_name cwd branch path version command issue_number
+  hook_name="$1"
+  cwd="$2"
+  branch="${3:-}"
+  path="${4:-}"
+  version="${5:-}"
+  command="$(configured_hook_command "${hook_name}")"
+  [[ -n "${command}" ]] || return 0
+
+  issue_number=""
+  if [[ -n "${branch}" ]]; then
+    issue_number="$(issue_number_for_branch "${branch}" || true)"
+  fi
+
+  (
+    cd "${cwd}" >/dev/null 2>&1 || die "could not enter ${cwd} for ${hook_name}"
+    GIT_VIBE_HOOK="${hook_name}" \
+    GIT_VIBE_REPO_ROOT="$(primary_repo_root)" \
+    GIT_VIBE_BASE_BRANCH="$(base_branch)" \
+    GIT_VIBE_BRANCH="${branch}" \
+    GIT_VIBE_WORKTREE_PATH="${path}" \
+    GIT_VIBE_VERSION="${version}" \
+    GIT_VIBE_ISSUE_NUMBER="${issue_number}" \
+    sh -c "${command}"
+  ) || die "hook failed: ${hook_name}"
+
+  say "Hook: ran ${hook_name}"
+}
+
 base_branch() {
   local configured
-  configured="$(git_config_get vibe.baseBranch)"
+  configured="$(shared_setting_get vibe.baseBranch vibe baseBranch)"
   printf '%s\n' "${configured:-main}"
 }
 
 branch_prefix() {
   local configured
-  configured="$(git_config_get vibe.branchPrefix)"
+  configured="$(shared_setting_get vibe.branchPrefix vibe branchPrefix)"
   printf '%s\n' "${configured:-feat/}"
 }
 
 open_editor_mode() {
   local configured
-  configured="$(git_config_get vibe.openEditor)"
+  configured="$(shared_setting_get vibe.openEditor vibe openEditor)"
   printf '%s\n' "${configured:-auto}"
 }
 
 workspace_app_setting() {
   local configured
-  configured="$(git_config_get vibe.openWorkspaceWith)"
+  configured="$(shared_setting_get vibe.openWorkspaceWith vibe openWorkspaceWith)"
   printf '%s\n' "${configured:-auto}"
 }
 
 delete_remote_on_finish() {
   local configured
-  configured="$(git config --bool --get vibe.deleteRemoteOnFinish 2>/dev/null || true)"
+  configured="$(shared_bool_setting_get vibe.deleteRemoteOnFinish vibe deleteRemoteOnFinish)"
   printf '%s\n' "${configured:-false}"
 }
 
 issue_branch_style() {
   local configured
-  configured="$(git_config_get vibe.issueBranchStyle)"
+  configured="$(shared_setting_get vibe.issueBranchStyle vibe issueBranchStyle)"
   printf '%s\n' "${configured:-number-and-title}"
 }
 
@@ -181,7 +368,7 @@ resolve_workspace_app() {
 
 release_version_file() {
   local configured root
-  configured="$(git_config_get vibe.releaseVersionFile)"
+  configured="$(shared_setting_get vibe.releaseVersionFile vibe releaseVersionFile)"
   if [[ -n "${configured}" ]]; then
     printf '%s\n' "${configured}"
     return 0
@@ -195,7 +382,7 @@ release_version_file() {
 
 worktree_root_setting() {
   local configured
-  configured="$(git_config_get vibe.worktreeRoot)"
+  configured="$(shared_setting_get vibe.worktreeRoot vibe worktreeRoot)"
   printf '%s\n' "${configured:-../.vibe}"
 }
 
@@ -1401,6 +1588,10 @@ command_code() {
     touch_session_metadata "${branch}"
   fi
 
+  if [[ "${action}" != "Opened" ]]; then
+    run_configured_hook "post-create" "${path}" "${branch}" "${path}"
+  fi
+
   say "${action} ${branch}"
   say "Path: ${path}"
   print_vibe_context "${branch}" "${path}"
@@ -1844,6 +2035,12 @@ command_finish() {
 
   [[ -n "${base_path}" ]] || die "could not find a stable worktree for ${base}"
 
+  if [[ -d "${path}" ]]; then
+    run_configured_hook "pre-finish" "${path}" "${branch}" "${path}"
+  else
+    run_configured_hook "pre-finish" "${base_path}" "${branch}" "${path}"
+  fi
+
   if [[ "${delete_remote}" == "true" ]]; then
     (
       cd "${base_path}" >/dev/null 2>&1 || die "could not enter ${base_path}"
@@ -1913,6 +2110,8 @@ command_release() {
   tag="v${version}"
   version_file="$(release_version_file)"
   tag_exists "${tag}" && die "tag ${tag} already exists"
+
+  run_configured_hook "pre-release" "$(repo_root)" "${base}" "$(repo_root)" "${version}"
 
   if [[ -n "${version_file}" ]]; then
     version_path="$(repo_root)/${version_file}"
@@ -2016,6 +2215,7 @@ command_list() {
 
 command_status() {
   local base current prefix root editor_mode workspace_app issue_style delete_remote_finish branch path
+  local repo_config_path hooks_summary
   local -a name_parts
   require_repo
 
@@ -2041,12 +2241,15 @@ command_status() {
   workspace_app="$(workspace_app_setting)"
   issue_style="$(issue_branch_style)"
   delete_remote_finish="$(delete_remote_on_finish)"
+  repo_config_path="$(repo_vibe_config_path || true)"
+  hooks_summary="$(configured_hooks_summary)"
   validate_open_editor_mode "${editor_mode}"
   validate_workspace_app "${workspace_app}"
   validate_issue_branch_style "${issue_style}"
   validate_delete_remote_on_finish "${delete_remote_finish}"
 
   say "Repo: $(repo_root)"
+  say "Repo config: ${repo_config_path:-none}"
   say "Base branch: ${base}"
   say "Current branch: ${current}"
   say "Branch prefix: ${prefix}"
@@ -2055,6 +2258,7 @@ command_status() {
   say "Open workspace with: ${workspace_app}"
   say "Issue branch style: ${issue_style}"
   say "Delete remote on finish: ${delete_remote_finish}"
+  say "Hooks: ${hooks_summary}"
   say ""
 
   if [[ ${#name_parts[@]} -gt 0 ]]; then
