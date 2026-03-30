@@ -243,6 +243,8 @@ Use `--editor` or `--no-editor` to override the launch policy for a single run. 
 
 After opening a vibe, Git Vibe prints a context summary with the branch, base, path, compare target, and current change state so you can orient yourself quickly in Codex, VS Code, or a plain terminal.
 
+Fresh vibes also inherit shared runtime paths from the primary checkout before any `post-create` hook runs. By default that means `node_modules` when the base checkout already has it. You can extend or replace that list with `vibe.sharedPaths` or `[vibe].sharedPaths` in `vibe.toml`.
+
 If you pass `--agent <agent>` or `--task <task>`, Git Vibe also records lightweight session metadata for that vibe.
 
 ### `git vibe issue [--editor] [--no-editor] [--codex|--vscode] [--agent <agent>] [--task <task>] <number>`
@@ -368,7 +370,7 @@ Lists active feature worktrees for the current repository, including each vibe's
 
 ### `git vibe status [name]`
 
-Shows the current repository, checked-in repo config path, base branch, branch prefix, worktree root, configured lifecycle hooks, and active vibes. When run inside a vibe worktree, or when you pass a vibe name, it also prints a focused workspace summary for that vibe, including session metadata, linked PR state, and a checks summary when available through `gh`.
+Shows the current repository, checked-in repo config path, base branch, branch prefix, worktree root, shared path plumbing, configured lifecycle hooks, and active vibes. When run inside a vibe worktree, or when you pass a vibe name, it also prints a focused workspace summary for that vibe, including session metadata, linked PR state, and a checks summary when available through `gh`.
 
 ### `git vibe check [name]`
 
@@ -464,6 +466,7 @@ openEditor = "auto"
 openWorkspaceWith = "auto"
 deleteRemoteOnFinish = true
 issueBranchStyle = "number-and-title"
+sharedPaths = "node_modules, .venv"
 
 [release]
 versioning = "file"
@@ -484,6 +487,7 @@ Supported `[vibe]` keys:
 - `openWorkspaceWith`
 - `deleteRemoteOnFinish`
 - `issueBranchStyle`
+- `sharedPaths`
 
 Supported `[release]` keys:
 
@@ -537,6 +541,19 @@ Supported values are:
 
 Git Vibe stores the issue-to-branch mapping locally so rerunning `git vibe code 9` keeps reopening the original vibe even if the GitHub issue title later changes.
 
+Shared dependency plumbing:
+
+```bash
+git config --global vibe.sharedPaths node_modules
+git config vibe.sharedPaths "node_modules,.venv"
+```
+
+`vibe.sharedPaths` is a comma-separated list of relative repo paths to symlink from the primary checkout into fresh vibes before `post-create` runs. Git Vibe also adds those linked paths to the worktree-local exclude file so the new vibe stays clean.
+
+- the built-in default is `node_modules`
+- set it to `none` to disable automatic shared path linking
+- use it for repo-local runtime paths like `node_modules`, `.venv`, `.direnv`, or `vendor/bundle`
+
 To block raw `main` pushes in a specific repo:
 
 ```bash
@@ -573,7 +590,7 @@ versioning = "npm"
 
 Lifecycle hooks live in the `[hooks]` section of `vibe.toml` and run through `sh -c`.
 
-- `post-create` runs after Git Vibe creates, attaches, or checks out a new worktree and before it prints the final workspace context
+- `post-create` runs after Git Vibe creates, attaches, or checks out a new worktree, after shared path plumbing is linked, and before it prints the final workspace context
 - `pre-finish` runs after merge verification succeeds and before Git Vibe deletes the worktree or branch
 - `pre-release` runs after release validation passes and before Git Vibe updates the version file, commits, or tags
 

@@ -49,6 +49,8 @@ EXPECTED_WORKTREE_DIR=""
 EXPECTED_CODEX_AUTO_WORKTREE_DIR=""
 EXPECTED_VIBE_ROOT_DIR=""
 
+export GIT_CONFIG_GLOBAL="${CONFIG_GLOBAL_FILE}"
+
 cleanup() {
   rm -rf "${TMP_DIR}"
 }
@@ -239,7 +241,8 @@ git -C "${REPO_DIR}" switch -c main >/dev/null
 git init --bare "${ORIGIN_DIR}" >/dev/null
 
 printf '# Demo\n' > "${REPO_DIR}/README.md"
-git -C "${REPO_DIR}" add README.md
+printf 'node_modules/\n' > "${REPO_DIR}/.gitignore"
+git -C "${REPO_DIR}" add README.md .gitignore
 VIBE_ALLOW_COMMIT_BASE=1 git -C "${REPO_DIR}" commit -m "chore: initial commit" >/dev/null
 git -C "${REPO_DIR}" remote add origin "${ORIGIN_DIR}"
 git -C "${REPO_DIR}" config vibe.baseBranch main
@@ -247,6 +250,8 @@ git -C "${REPO_DIR}" config vibe.branchPrefix feat/
 git -C "${REPO_DIR}" config vibe.worktreeRoot ../.vibe
 git -C "${REPO_DIR}" config vibe.disallowPushOnBase false
 git -C "${REPO_DIR}" push -u origin main >/dev/null
+mkdir -p "${REPO_DIR}/node_modules/sails"
+printf 'module.exports = {}\n' > "${REPO_DIR}/node_modules/sails/index.js"
 
 git init "${CONFIG_REPO_DIR}" >/dev/null
 git -C "${CONFIG_REPO_DIR}" config user.name "Git Vibe Smoke"
@@ -256,6 +261,7 @@ git -C "${CONFIG_REPO_DIR}" switch -c main >/dev/null
 
 printf '# Config Demo\n' > "${CONFIG_REPO_DIR}/README.md"
 printf '0.0.0\n' > "${CONFIG_REPO_DIR}/VERSION"
+printf 'node_modules/\n.venv/\n' > "${CONFIG_REPO_DIR}/.gitignore"
 cat > "${CONFIG_REPO_DIR}/vibe.toml" <<EOF
 [vibe]
 worktreeRoot = "../repo-vibes"
@@ -263,6 +269,7 @@ openEditor = "never"
 openWorkspaceWith = "vscode"
 deleteRemoteOnFinish = true
 issueBranchStyle = "number-only"
+sharedPaths = "node_modules, .venv"
 
 [release]
 versioning = "file"
@@ -273,8 +280,11 @@ post-create = "${CONFIG_HOOK_RECORDER}"
 pre-finish = "${CONFIG_HOOK_RECORDER}"
 pre-release = "${CONFIG_HOOK_RECORDER}"
 EOF
-git -C "${CONFIG_REPO_DIR}" add README.md VERSION vibe.toml
+git -C "${CONFIG_REPO_DIR}" add README.md VERSION .gitignore vibe.toml
 VIBE_ALLOW_COMMIT_BASE=1 git -C "${CONFIG_REPO_DIR}" commit -m "chore: initial config demo" >/dev/null
+mkdir -p "${CONFIG_REPO_DIR}/node_modules/sails" "${CONFIG_REPO_DIR}/.venv/bin"
+printf 'module.exports = {}\n' > "${CONFIG_REPO_DIR}/node_modules/sails/index.js"
+printf '#!/usr/bin/env bash\n' > "${CONFIG_REPO_DIR}/.venv/bin/python"
 
 git config --file "${CONFIG_GLOBAL_FILE}" vibe.worktreeRoot ../global-vibes
 git config --file "${CONFIG_GLOBAL_FILE}" vibe.openEditor always
@@ -288,6 +298,7 @@ CONFIG_STATUS_OUTPUT="$(
 [[ "${CONFIG_STATUS_OUTPUT}" == *"Vibe root: ${TMP_DIR}/repo-vibes/config-demo"* ]] || fail "repo vibe.toml should override the global worktree root"
 [[ "${CONFIG_STATUS_OUTPUT}" == *"Open editor: never"* ]] || fail "repo vibe.toml should override the global openEditor setting"
 [[ "${CONFIG_STATUS_OUTPUT}" == *"Delete remote on finish: true"* ]] || fail "repo vibe.toml should override the global deleteRemoteOnFinish setting"
+[[ "${CONFIG_STATUS_OUTPUT}" == *"Shared paths: node_modules, .venv"* ]] || fail "check did not summarize repo-configured shared paths"
 [[ "${CONFIG_STATUS_OUTPUT}" == *"Hooks: post-create, pre-finish, pre-release"* ]] || fail "check did not summarize the configured lifecycle hooks"
 
 git -C "${CONFIG_REPO_DIR}" config vibe.worktreeRoot ../local-vibes
@@ -301,6 +312,7 @@ CONFIG_LOCAL_OVERRIDE_OUTPUT="$(
 [[ "${CONFIG_LOCAL_OVERRIDE_OUTPUT}" == *"Vibe root: ${TMP_DIR}/local-vibes/config-demo"* ]] || fail "local git config should override the checked-in vibe.toml worktree root"
 [[ "${CONFIG_LOCAL_OVERRIDE_OUTPUT}" == *"Open editor: auto"* ]] || fail "local git config should override the checked-in vibe.toml openEditor setting"
 [[ "${CONFIG_LOCAL_OVERRIDE_OUTPUT}" == *"Delete remote on finish: false"* ]] || fail "local git config should override the checked-in vibe.toml deleteRemoteOnFinish setting"
+[[ "${CONFIG_LOCAL_OVERRIDE_OUTPUT}" == *"Shared paths: node_modules, .venv"* ]] || fail "local git config should still inherit shared paths from repo vibe.toml"
 
 git -C "${CONFIG_REPO_DIR}" config --unset vibe.worktreeRoot
 git -C "${CONFIG_REPO_DIR}" config --unset vibe.openEditor
@@ -313,7 +325,15 @@ CONFIG_CODE_OUTPUT="$(
   GIT_CONFIG_GLOBAL="${CONFIG_GLOBAL_FILE}" "${ROOT}/bin/git-vibe" code repo-config-demo
 )"
 [[ -d "${CONFIG_WORKTREE_DIR}" ]] || fail "repo vibe.toml did not create the expected worktree"
+[[ -L "${CONFIG_WORKTREE_DIR}/node_modules" ]] || fail "code did not link node_modules into the config demo worktree"
+[[ "$(readlink "${CONFIG_WORKTREE_DIR}/node_modules")" == "${CONFIG_REPO_DIR}/node_modules" ]] || fail "config demo node_modules link did not target the base checkout"
+[[ -L "${CONFIG_WORKTREE_DIR}/.venv" ]] || fail "code did not link .venv into the config demo worktree"
+[[ "$(readlink "${CONFIG_WORKTREE_DIR}/.venv")" == "${CONFIG_REPO_DIR}/.venv" ]] || fail "config demo .venv link did not target the base checkout"
+CONFIG_WORKTREE_STATUS="$(git -C "${CONFIG_WORKTREE_DIR}" status --short)"
+[[ "${CONFIG_WORKTREE_STATUS}" != *"node_modules"* ]] || fail "linked node_modules should not dirty the config demo worktree"
+[[ "${CONFIG_WORKTREE_STATUS}" != *".venv"* ]] || fail "linked .venv should not dirty the config demo worktree"
 [[ -f "${CONFIG_WORKTREE_DIR}/.vibe-hook-created" ]] || fail "post-create hook did not run its setup task"
+[[ "${CONFIG_CODE_OUTPUT}" == *"Plumbing: linked node_modules, .venv"* ]] || fail "code did not report the linked shared paths"
 [[ "${CONFIG_CODE_OUTPUT}" == *"Hook: ran post-create"* ]] || fail "code did not report the post-create hook"
 [[ "$(<"${CONFIG_HOOK_LOG}")" == *"post-create|feat/repo-config-demo|${CONFIG_WORKTREE_DIR}||"* ]] || fail "post-create hook did not receive the expected branch and worktree context"
 
@@ -394,8 +414,12 @@ SMOKE_CODE_OUTPUT="$(
   "${ROOT}/bin/git-vibe" code smoke-test
 )"
 [[ -d "${WORKTREE_DIR}" ]] || fail "worktree was not created"
+[[ -L "${WORKTREE_DIR}/node_modules" ]] || fail "code did not link default node_modules into the worktree"
+[[ "$(readlink "${WORKTREE_DIR}/node_modules")" == "${REPO_DIR}/node_modules" ]] || fail "default node_modules link did not target the base checkout"
+[[ -z "$(git -C "${WORKTREE_DIR}" status --short)" ]] || fail "linked default node_modules should not dirty the worktree"
 EXPECTED_WORKTREE_DIR="$(cd "${WORKTREE_DIR}" && pwd -P)"
 EXPECTED_VIBE_ROOT_DIR="$(cd "${TMP_DIR}/.vibe" && pwd -P)/demo"
+[[ "${SMOKE_CODE_OUTPUT}" == *"Plumbing: linked node_modules"* ]] || fail "code did not report the default node_modules plumbing"
 [[ "${SMOKE_CODE_OUTPUT}" == *"Compare: main...feat/smoke-test"* ]] || fail "code did not print the expected compare context"
 [[ "${SMOKE_CODE_OUTPUT}" == *"Changes vs main: none"* ]] || fail "code did not print the expected clean summary"
 
@@ -414,6 +438,7 @@ SMOKE_CHECK_OUTPUT="$(
 )"
 [[ "${SMOKE_CHECK_OUTPUT}" == *"Branch: feat/smoke-test"* ]] || fail "check did not show the vibe branch context"
 [[ "${SMOKE_CHECK_OUTPUT}" == *"Compare: main...feat/smoke-test"* ]] || fail "check did not show the expected compare target"
+[[ "${SMOKE_CHECK_OUTPUT}" == *"Shared paths: node_modules"* ]] || fail "check did not show the default shared paths"
 
 SMOKE_CHECK_IN_VIBE_OUTPUT="$(
   cd "${WORKTREE_DIR}" >/dev/null

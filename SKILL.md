@@ -59,7 +59,7 @@ git vibe pr
 git vibe submit
 ```
 
-Workspace launch follows `vibe.openEditor=auto|always|never`. The default is `auto`, which opens a workspace app only in interactive terminals. Use `--editor` or `--no-editor` to override that for one run, and `--codex` or `--vscode` to force the target app. After opening a vibe, Git Vibe should print enough branch/base/diff context that the worktree feels anchored even when the editor or terminal does not visibly switch for you.
+Workspace launch follows `vibe.openEditor=auto|always|never`. The default is `auto`, which opens a workspace app only in interactive terminals. Use `--editor` or `--no-editor` to override that for one run, and `--codex` or `--vscode` to force the target app. After opening a vibe, Git Vibe should print enough branch/base/diff context that the worktree feels anchored even when the editor or terminal does not visibly switch for you. Fresh vibes should also inherit shared runtime paths from the primary checkout before any `post-create` hook runs. The built-in default is `node_modules`, repos can override or extend it with `vibe.sharedPaths`, and linked paths should be added to the worktree-local exclude file so the vibe stays clean.
 
 Issue-driven vibes use `gh issue view` to build deterministic branch names. `vibe.issueBranchStyle=number-and-title|number-only|title-only` controls the naming shape, and Git Vibe remembers the issue-to-branch mapping locally so later issue-title edits do not break reopen flows.
 
@@ -70,7 +70,7 @@ Shared repo defaults should live in a checked-in `vibe.toml`, not only in ad hoc
 3. global Git config
 4. built-in defaults
 
-Keep the `vibe.toml` format intentionally small. Git Vibe only needs straightforward scalar settings under `[vibe]` plus lifecycle commands under `[hooks]`.
+Keep the `vibe.toml` format intentionally small. Git Vibe only needs straightforward scalar settings under `[vibe]` plus lifecycle commands under `[hooks]`. Use `sharedPaths = "node_modules,.venv"` when a repo wants fresh vibes to reuse base-checkout runtime plumbing.
 
 PR-driven handoff uses `gh pr create`, `gh pr view`, and `gh pr checks` so the workflow stays GitHub-native. `git vibe check` should surface PR/check summary when available, and `git vibe checks` should let users inspect the individual checks without leaving the vibe flow.
 
@@ -167,7 +167,7 @@ Show vibe status:
 git vibe status
 ```
 
-`git vibe status` or `git vibe check` should stay useful both from `main` and from inside a vibe worktree. When run inside a vibe, the reported vibe root should still point at the shared repo-level worktree area, not a nested path under the current worktree. If a vibe has saved session metadata, status should surface the agent label, task, and last activity clearly enough that a human can resume the lane without guessing.
+`git vibe status` or `git vibe check` should stay useful both from `main` and from inside a vibe worktree. When run inside a vibe, the reported vibe root should still point at the shared repo-level worktree area, not a nested path under the current worktree. If a vibe has saved session metadata, status should surface the agent label, task, and last activity clearly enough that a human can resume the lane without guessing. It should also show the active shared path plumbing so runtime setup is visible instead of magical.
 
 Show the path for a vibe:
 
@@ -263,7 +263,7 @@ Remote cleanup should stay safe and boring:
 
 Lifecycle hooks should stay explicit and narrow:
 
-- `post-create` is for setup after a brand-new vibe worktree is created, attached, or checked out
+- `post-create` is for setup after a brand-new vibe worktree is created, attached, or checked out, after shared path plumbing is linked
 - `pre-finish` is for validation or cleanup just before Git Vibe removes the worktree and branch
 - `pre-release` is for checks that must pass before Git Vibe mutates the version file, creates the release commit, or tags
 - hooks should be optional, repo-local, and abort the command when they fail

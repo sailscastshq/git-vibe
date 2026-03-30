@@ -293,6 +293,68 @@ issue_branch_style() {
   printf '%s\n' "${configured:-number-and-title}"
 }
 
+shared_paths_setting() {
+  local configured
+  configured="$(shared_setting_get vibe.sharedPaths vibe sharedPaths)"
+  if [[ -n "${configured}" ]]; then
+    printf '%s\n' "${configured}"
+  else
+    printf '%s\n' "node_modules"
+  fi
+}
+
+validate_shared_path() {
+  local path
+  path="$1"
+
+  case "${path}" in
+    ""|.|..|/*|./*|../*|*/./*|*/../*|*/.|*/..)
+      die "invalid vibe.sharedPaths entry: ${path} (expected relative repo paths like node_modules or .venv)"
+      ;;
+  esac
+}
+
+shared_paths_list() {
+  local configured raw entry seen
+  local -a raw_entries
+  configured="$(trim_whitespace "$(shared_paths_setting)")"
+  if [[ -z "${configured}" || "${configured}" == "none" ]]; then
+    return 0
+  fi
+
+  seen=$'\n'
+  IFS=',' read -r -a raw_entries <<< "${configured}"
+  for raw in "${raw_entries[@]}"; do
+    entry="$(trim_whitespace "${raw}")"
+    [[ -n "${entry}" ]] || continue
+    validate_shared_path "${entry}"
+
+    case "${seen}" in
+      *$'\n'"${entry}"$'\n'*)
+        ;;
+      *)
+        printf '%s\n' "${entry}"
+        seen="${seen}${entry}"$'\n'
+        ;;
+    esac
+  done
+}
+
+shared_paths_summary() {
+  local path summary
+  summary=""
+
+  while IFS= read -r path; do
+    [[ -n "${path}" ]] || continue
+    if [[ -n "${summary}" ]]; then
+      summary="${summary}, "
+    fi
+    summary="${summary}${path}"
+  done < <(shared_paths_list)
+
+  printf '%s\n' "${summary:-none}"
+}
+
 validate_open_editor_mode() {
   case "$1" in
     auto|always|never)
@@ -440,6 +502,55 @@ summarize_paths() {
   done
 
   printf '%s\n' "${summary}"
+}
+
+ensure_worktree_exclude_path() {
+  local worktree_path relative_path exclude_file pattern
+  worktree_path="$1"
+  relative_path="$2"
+  exclude_file="$(git -C "${worktree_path}" rev-parse --git-path info/exclude)"
+  pattern="/${relative_path}"
+
+  mkdir -p "$(dirname "${exclude_file}")"
+  touch "${exclude_file}"
+
+  if ! grep -Fqx "${pattern}" "${exclude_file}" 2>/dev/null; then
+    printf '%s\n' "${pattern}" >> "${exclude_file}"
+  fi
+}
+
+apply_shared_paths() {
+  local worktree_path source_root relative_path source_path target_path
+  local -a linked_paths
+  worktree_path="$1"
+  source_root="$(primary_repo_root)"
+  linked_paths=()
+
+  [[ -n "${worktree_path}" ]] || return 0
+  [[ "${worktree_path}" != "${source_root}" ]] || return 0
+
+  while IFS= read -r relative_path; do
+    [[ -n "${relative_path}" ]] || continue
+    source_path="${source_root}/${relative_path}"
+    target_path="${worktree_path}/${relative_path}"
+
+    if [[ ! -e "${source_path}" && ! -L "${source_path}" ]]; then
+      continue
+    fi
+
+    if [[ -e "${target_path}" || -L "${target_path}" ]]; then
+      continue
+    fi
+
+    mkdir -p "$(dirname "${target_path}")"
+    ln -s "${source_path}" "${target_path}"
+    ensure_worktree_exclude_path "${worktree_path}" "${relative_path}"
+    linked_paths+=("${relative_path}")
+  done < <(shared_paths_list)
+
+  if [[ ${#linked_paths[@]} -gt 0 ]]; then
+    say "Plumbing: linked $(summarize_paths "${linked_paths[@]}")"
+  fi
 }
 
 apply_file_release_versioning() {
@@ -1722,6 +1833,7 @@ command_code() {
   fi
 
   if [[ "${action}" != "Opened" ]]; then
+    apply_shared_paths "${path}"
     run_configured_hook "post-create" "${path}" "${branch}" "${path}"
   fi
 
@@ -2344,7 +2456,7 @@ command_list() {
 }
 
 command_status() {
-  local base current prefix root editor_mode workspace_app issue_style delete_remote_finish branch path
+  local base current prefix root editor_mode workspace_app issue_style delete_remote_finish shared_paths branch path
   local repo_config_path hooks_summary
   local -a name_parts
   require_repo
@@ -2371,6 +2483,7 @@ command_status() {
   workspace_app="$(workspace_app_setting)"
   issue_style="$(issue_branch_style)"
   delete_remote_finish="$(delete_remote_on_finish)"
+  shared_paths="$(shared_paths_summary)"
   repo_config_path="$(repo_vibe_config_path || true)"
   hooks_summary="$(configured_hooks_summary)"
   validate_open_editor_mode "${editor_mode}"
@@ -2388,6 +2501,7 @@ command_status() {
   say "Open workspace with: ${workspace_app}"
   say "Issue branch style: ${issue_style}"
   say "Delete remote on finish: ${delete_remote_finish}"
+  say "Shared paths: ${shared_paths}"
   say "Hooks: ${hooks_summary}"
   say ""
 
