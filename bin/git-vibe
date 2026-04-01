@@ -293,6 +293,20 @@ issue_branch_style() {
   printf '%s\n' "${configured:-number-and-title}"
 }
 
+vibe_mode_setting() {
+  local configured
+  configured="$(shared_setting_get vibe.mode vibe mode)"
+  printf '%s\n' "${configured:-worktree}"
+}
+
+resolve_vibe_mode() {
+  local requested resolved
+  requested="${1:-}"
+  resolved="${requested:-$(vibe_mode_setting)}"
+  validate_vibe_mode "${resolved}"
+  printf '%s\n' "${resolved}"
+}
+
 shared_paths_setting() {
   local configured
   configured="$(shared_setting_get vibe.sharedPaths vibe sharedPaths)"
@@ -409,6 +423,16 @@ validate_issue_branch_style() {
       ;;
     *)
       die "invalid vibe.issueBranchStyle: $1 (expected number-and-title, number-only, or title-only)"
+      ;;
+  esac
+}
+
+validate_vibe_mode() {
+  case "$1" in
+    worktree|solo)
+      ;;
+    *)
+      die "invalid vibe.mode: $1 (expected worktree or solo)"
       ;;
   esac
 }
@@ -634,6 +658,12 @@ current_branch() {
   git branch --show-current
 }
 
+current_branch_at_path() {
+  local path
+  path="$1"
+  git -C "${path}" branch --show-current 2>/dev/null || true
+}
+
 slugify() {
   printf '%s' "$*" \
     | tr '[:upper:]' '[:lower:]' \
@@ -697,6 +727,22 @@ issue_url_mapping() {
   git_config_get "$(issue_url_key "$1")"
 }
 
+branch_mode_key() {
+  printf 'vibe.branch.%s.mode\n' "$(slug_from_branch "$1")"
+}
+
+branch_path_key() {
+  printf 'vibe.branch.%s.path\n' "$(slug_from_branch "$1")"
+}
+
+branch_mode_mapping() {
+  git_config_get "$(branch_mode_key "$1")"
+}
+
+branch_path_mapping() {
+  git_config_get "$(branch_path_key "$1")"
+}
+
 remember_issue_branch() {
   local number branch title url
   number="$1"
@@ -707,6 +753,23 @@ remember_issue_branch() {
   git config "$(issue_branch_key "${number}")" "${branch}"
   git config "$(issue_title_key "${number}")" "${title}"
   git config "$(issue_url_key "${number}")" "${url}"
+}
+
+remember_branch_workspace() {
+  local branch mode path
+  branch="$1"
+  mode="$2"
+  path="$3"
+
+  git config "$(branch_mode_key "${branch}")" "${mode}"
+  git config "$(branch_path_key "${branch}")" "${path}"
+}
+
+clear_branch_workspace() {
+  local branch
+  branch="$1"
+  git config --unset-all "$(branch_mode_key "${branch}")" >/dev/null 2>&1 || true
+  git config --unset-all "$(branch_path_key "${branch}")" >/dev/null 2>&1 || true
 }
 
 require_gh() {
@@ -1216,6 +1279,50 @@ find_worktree_for_branch() {
   return 1
 }
 
+vibe_backing_for_branch() {
+  local branch path recorded
+  branch="$1"
+  recorded="$(branch_mode_mapping "${branch}")"
+  if [[ -n "${recorded}" ]]; then
+    validate_vibe_mode "${recorded}"
+    printf '%s\n' "${recorded}"
+    return 0
+  fi
+
+  path="$(find_worktree_for_branch "${branch}" || true)"
+
+  if [[ -n "${path}" ]]; then
+    if [[ "${path}" == "$(primary_repo_root)" ]]; then
+      printf '%s\n' "solo"
+    else
+      printf '%s\n' "worktree"
+    fi
+    return 0
+  fi
+
+  branch_exists "${branch}" || die "vibe branch not found: ${branch}"
+  printf '%s\n' "solo"
+}
+
+vibe_path_for_branch() {
+  local branch path
+  branch="$1"
+  path="$(find_worktree_for_branch "${branch}" || true)"
+
+  if [[ -n "${path}" ]]; then
+    printf '%s\n' "${path}"
+    return 0
+  fi
+
+  path="$(branch_path_mapping "${branch}")"
+  if [[ -n "${path}" ]]; then
+    printf '%s\n' "${path}"
+    return 0
+  fi
+
+  printf '%s\n' "$(primary_repo_root)"
+}
+
 worktree_records_raw() {
   local path branch head detached bare locked prunable locked_reason prunable_reason line
   path=""
@@ -1308,6 +1415,35 @@ list_vibes_raw() {
   done < <(worktree_records_raw)
 }
 
+local_vibe_branches_raw() {
+  local prefix
+  prefix="$(branch_prefix)"
+  git for-each-ref --format='%(refname:short)' "refs/heads/${prefix}*"
+}
+
+worktree_record_for_branch() {
+  local target branch path head detached bare locked locked_reason prunable prunable_reason
+  target="$1"
+
+  while IFS=$'\t' read -r branch path head detached bare locked locked_reason prunable prunable_reason; do
+    if [[ "${branch}" == "${target}" ]]; then
+      printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "${branch}" \
+        "${path}" \
+        "${head}" \
+        "${detached}" \
+        "${bare}" \
+        "${locked}" \
+        "${locked_reason}" \
+        "${prunable}" \
+        "${prunable_reason}"
+      return 0
+    fi
+  done < <(list_vibes_raw)
+
+  return 1
+}
+
 is_vibe_branch() {
   local branch prefix
   branch="$1"
@@ -1335,7 +1471,7 @@ resolve_vibe_branch() {
   fi
 
   branch="$(current_branch)"
-  is_vibe_branch "${branch}" || die "run this command inside a vibe worktree or pass a vibe name"
+  is_vibe_branch "${branch}" || die "run this command inside a vibe branch or pass a vibe name"
   printf '%s\n' "${branch}"
 }
 
@@ -1369,13 +1505,21 @@ accessible_worktree_path() {
   worktree_path_exists "${path}" && git -C "${path}" rev-parse --is-inside-work-tree >/dev/null 2>&1
 }
 
+branch_active_at_path() {
+  local path branch
+  path="$1"
+  branch="$2"
+  accessible_worktree_path "${path}" || return 1
+  [[ "$(current_branch_at_path "${path}")" == "${branch}" ]]
+}
+
 vibe_merge_base() {
   local base path branch
   base="$1"
   path="$2"
   branch="${3:-}"
 
-  if accessible_worktree_path "${path}"; then
+  if accessible_worktree_path "${path}" && [[ -z "${branch}" || "$(current_branch_at_path "${path}")" == "${branch}" ]]; then
     git -C "${path}" merge-base "${base}" HEAD
     return 0
   fi
@@ -1389,32 +1533,44 @@ vibe_merge_base() {
 }
 
 vibe_diff_shortstat() {
-  local merge_base path
+  local merge_base path branch
   merge_base="$1"
   path="$2"
+  branch="${3:-}"
 
-  accessible_worktree_path "${path}" || return 0
   [[ -n "${merge_base}" ]] || return 0
-  git -C "${path}" diff --shortstat "${merge_base}" || true
+
+  if accessible_worktree_path "${path}" && [[ -z "${branch}" || "$(current_branch_at_path "${path}")" == "${branch}" ]]; then
+    git -C "${path}" diff --shortstat "${merge_base}" || true
+    return 0
+  fi
+
+  [[ -n "${branch}" ]] || return 0
+  git diff --shortstat "${merge_base}..${branch}" || true
 }
 
 vibe_dirty_count() {
-  local path
+  local path branch
   path="$1"
+  branch="${2:-}"
 
-  accessible_worktree_path "${path}" || {
+  if ! accessible_worktree_path "${path}" || [[ -n "${branch}" && "$(current_branch_at_path "${path}")" != "${branch}" ]]; then
     printf '%s\n' "-"
     return 0
-  }
+  fi
 
   git -C "${path}" status --porcelain | wc -l | tr -d ' '
 }
 
 vibe_untracked_files() {
-  local path
+  local path branch
   path="$1"
+  branch="${2:-}"
 
-  accessible_worktree_path "${path}" || return 0
+  if ! accessible_worktree_path "${path}" || [[ -n "${branch}" && "$(current_branch_at_path "${path}")" != "${branch}" ]]; then
+    return 0
+  fi
+
   git -C "${path}" ls-files --others --exclude-standard
 }
 
@@ -1457,16 +1613,26 @@ worktree_state_label() {
   )
 }
 
+vibe_state_label() {
+  local branch path locked prunable
+  branch="$1"
+  path="$2"
+  locked="$3"
+  prunable="$4"
+
+  if [[ -n "${path}" ]]; then
+    worktree_state_label "${path}" "${locked}" "${prunable}"
+    return 0
+  fi
+
+  printf '%s\n' "branch-only"
+}
+
 worktree_change_summary() {
   local base branch path merge_base diff_summary untracked_count
   base="$1"
   branch="$2"
   path="$3"
-
-  if ! accessible_worktree_path "${path}"; then
-    printf '%s\n' "-"
-    return 0
-  fi
 
   merge_base="$(vibe_merge_base "${base}" "${path}" "${branch}" || true)"
   [[ -n "${merge_base}" ]] || {
@@ -1474,8 +1640,8 @@ worktree_change_summary() {
     return 0
   }
 
-  diff_summary="$(vibe_diff_shortstat "${merge_base}" "${path}")"
-  untracked_count="$(vibe_untracked_files "${path}" | wc -l | tr -d ' ')"
+  diff_summary="$(vibe_diff_shortstat "${merge_base}" "${path}" "${branch}")"
+  untracked_count="$(vibe_untracked_files "${path}" "${branch}" | wc -l | tr -d ' ')"
 
   if [[ -n "${diff_summary}" ]]; then
     printf '%s\n' "${diff_summary}"
@@ -1487,19 +1653,25 @@ worktree_change_summary() {
 }
 
 print_vibe_context() {
-  local branch path base merge_base diff_summary dirty_count behind ahead untracked_count issue_number issue_title issue_url
+  local branch path base merge_base diff_summary dirty_count behind ahead untracked_count issue_number issue_title issue_url backing active_checkout
   branch="$1"
   path="$2"
   base="$(base_branch)"
+  backing="$(vibe_backing_for_branch "${branch}")"
+  active_checkout="false"
+  if accessible_worktree_path "${path}" && [[ "$(current_branch_at_path "${path}")" == "${branch}" ]]; then
+    active_checkout="true"
+  fi
   merge_base="$(vibe_merge_base "${base}" "${path}" "${branch}" || true)"
-  diff_summary="$(vibe_diff_shortstat "${merge_base}" "${path}")"
-  dirty_count="$(vibe_dirty_count "${path}")"
-  untracked_count="$(vibe_untracked_files "${path}" | wc -l | tr -d ' ')"
+  diff_summary="$(vibe_diff_shortstat "${merge_base}" "${path}" "${branch}")"
+  dirty_count="$(vibe_dirty_count "${path}" "${branch}")"
+  untracked_count="$(vibe_untracked_files "${path}" "${branch}" | wc -l | tr -d ' ')"
   read -r behind ahead < <(git rev-list --left-right --count "${base}...${branch}" 2>/dev/null || printf '0 0\n')
 
   say "Context:"
   say "  Branch: ${branch}"
   say "  Base: ${base}"
+  say "  Backing: ${backing}"
   say "  Path: ${path}"
   say "  Compare: ${base}...${branch}"
   say "  Ahead/behind vs ${base}: +${ahead}/-${behind}"
@@ -1522,18 +1694,20 @@ print_vibe_context() {
 
   if ! accessible_worktree_path "${path}"; then
     say "  Working tree: unavailable (worktree path missing)"
+  elif [[ "${active_checkout}" != "true" ]]; then
+    say "  Working tree: branch is not currently checked out in this path"
   elif [[ "${dirty_count}" == "0" ]]; then
     say "  Working tree: clean"
   else
     say "  Working tree: ${dirty_count} uncommitted change(s)"
   fi
 
-  if ! accessible_worktree_path "${path}"; then
-    say "  Changes vs ${base}: unavailable"
-  elif [[ -n "${diff_summary}" ]]; then
+  if [[ -n "${diff_summary}" ]]; then
     say "  Changes vs ${base}: ${diff_summary}"
   elif [[ "${untracked_count}" != "0" ]]; then
     say "  Changes vs ${base}: ${untracked_count} untracked file(s)"
+  elif ! accessible_worktree_path "${path}"; then
+    say "  Changes vs ${base}: unavailable"
   else
     say "  Changes vs ${base}: none"
   fi
@@ -1602,13 +1776,13 @@ print_help() {
 Git Vibe
 
 Usage:
-  git vibe code [--editor|--no-editor] [--codex|--vscode] [--agent <agent>] [--task <task>] <name>
-  git vibe issue [--editor|--no-editor] [--codex|--vscode] [--agent <agent>] [--task <task>] <number>
+  git vibe code [--solo|--worktree] [--editor|--no-editor] [--codex|--vscode] [--agent <agent>] [--task <task>] <name>
+  git vibe issue [--solo|--worktree] [--editor|--no-editor] [--codex|--vscode] [--agent <agent>] [--task <task>] <number>
   git vibe session [--agent <agent>] [--task <task>] [--clear] [name]
   git vibe pr [--draft] [--web] [--title <title>] [--body <body>] [name]
   git vibe submit [--draft] [--web] [--title <title>] [--body <body>] [name]
   git vibe checks [name]
-  git vibe enter [name]
+  git vibe enter [--editor|--no-editor] [--codex|--vscode] [name]
   git vibe open [--codex|--vscode] [name]
   git vibe diff [name]
   git vibe finish [--local] [--sync] [--delete-remote|--keep-remote] [name]
@@ -1625,6 +1799,7 @@ Usage:
 
 Examples:
   git vibe code fallback-app-urls
+  git vibe code --solo fallback-app-urls
   git vibe code --agent codex --task "fix login redirect" fallback-app-urls
   git vibe code 9
   git vibe issue 9
@@ -1634,6 +1809,7 @@ Examples:
   git vibe checks 10
   git vibe code --codex fallback-app-urls
   git vibe code --no-editor fallback-app-urls
+  git vibe enter --vscode fallback-app-urls
   git vibe enter fallback-app-urls
   git vibe open fallback-app-urls
   git vibe diff fallback-app-urls
@@ -1682,7 +1858,7 @@ open_workspace_for_path() {
 }
 
 command_code() {
-  local name slug branch base path shell_output open_editor action base_path editor_mode workspace_app workspace_app_override
+  local name slug branch base path shell_output open_editor action base_path editor_mode workspace_app workspace_app_override mode_override requested_mode
   local session_agent session_task current_session_agent current_session_task final_session_agent final_session_task detected_session_agent
   local agent_set task_set
   local issue_number issue_title issue_url issue_metadata
@@ -1692,6 +1868,7 @@ command_code() {
   shell_output="false"
   open_editor=""
   workspace_app_override=""
+  mode_override=""
   session_agent=""
   session_task=""
   agent_set="false"
@@ -1714,6 +1891,12 @@ command_code() {
         ;;
       --vscode)
         workspace_app_override="vscode"
+        ;;
+      --solo)
+        mode_override="solo"
+        ;;
+      --worktree)
+        mode_override="worktree"
         ;;
       --agent)
         shift
@@ -1764,43 +1947,68 @@ command_code() {
     branch="$(branch_from_slug "${slug}")"
   fi
 
+  requested_mode="$(resolve_vibe_mode "${mode_override}")"
   base="$(base_branch)"
   path="$(worktree_path_for_slug "${slug}")"
   action="Opened"
 
   if find_worktree_for_branch "${branch}" >/dev/null 2>&1; then
     path="$(find_worktree_for_branch "${branch}")"
-  elif branch_exists "${branch}"; then
-    if [[ -e "${path}" ]]; then
-      die "worktree path already exists: ${path}"
+    requested_mode="$(vibe_backing_for_branch "${branch}")"
+  elif [[ "${requested_mode}" == "solo" ]]; then
+    path="$(repo_root)"
+
+    if branch_exists "${branch}"; then
+      if [[ "$(current_branch)" == "${branch}" ]]; then
+        action="Opened"
+      else
+        ensure_clean_tree "${path}"
+        git -C "${path}" switch "${branch}" >/dev/null
+        action="Switched"
+      fi
+    elif remote_branch_exists "origin/${branch}"; then
+      ensure_clean_tree "${path}"
+      git -C "${path}" switch -c "${branch}" --track "origin/${branch}" >/dev/null
+      action="Checked out"
+    else
+      branch_exists "${base}" || die "base branch ${base} does not exist locally"
+      ensure_clean_tree "${path}"
+      git -C "${path}" switch -c "${branch}" "${base}" >/dev/null
+      action="Started"
     fi
-    mkdir -p "$(vibe_root)"
-    git worktree add "${path}" "${branch}"
-    action="Attached"
-  elif remote_branch_exists "origin/${branch}"; then
-    if [[ -e "${path}" ]]; then
-      die "worktree path already exists: ${path}"
-    fi
-    mkdir -p "$(vibe_root)"
-    git worktree add -b "${branch}" "${path}" "origin/${branch}"
-    git -C "${path}" branch --set-upstream-to "origin/${branch}" "${branch}" >/dev/null 2>&1 || true
-    action="Checked out"
   else
-    branch_exists "${base}" || die "base branch ${base} does not exist locally"
-    base_path="$(base_worktree_path || true)"
+    if branch_exists "${branch}"; then
+      if [[ -e "${path}" ]]; then
+        die "worktree path already exists: ${path}"
+      fi
+      mkdir -p "$(vibe_root)"
+      git worktree add "${path}" "${branch}"
+      action="Attached"
+    elif remote_branch_exists "origin/${branch}"; then
+      if [[ -e "${path}" ]]; then
+        die "worktree path already exists: ${path}"
+      fi
+      mkdir -p "$(vibe_root)"
+      git worktree add -b "${branch}" "${path}" "origin/${branch}"
+      git -C "${path}" branch --set-upstream-to "origin/${branch}" "${branch}" >/dev/null 2>&1 || true
+      action="Checked out"
+    else
+      branch_exists "${base}" || die "base branch ${base} does not exist locally"
+      base_path="$(base_worktree_path || true)"
 
-    if [[ -n "${base_path}" ]]; then
-      ensure_clean_tree "${base_path}"
-      git -C "${base_path}" switch "${base}" >/dev/null 2>&1 || true
+      if [[ -n "${base_path}" ]]; then
+        ensure_clean_tree "${base_path}"
+        git -C "${base_path}" switch "${base}" >/dev/null 2>&1 || true
+      fi
+
+      if [[ -e "${path}" ]]; then
+        die "worktree path already exists: ${path}"
+      fi
+
+      mkdir -p "$(vibe_root)"
+      git worktree add -b "${branch}" "${path}" "${base}"
+      action="Started"
     fi
-
-    if [[ -e "${path}" ]]; then
-      die "worktree path already exists: ${path}"
-    fi
-
-    mkdir -p "$(vibe_root)"
-    git worktree add -b "${branch}" "${path}" "${base}"
-    action="Started"
   fi
 
   if [[ -n "${issue_number}" ]]; then
@@ -1832,7 +2040,9 @@ command_code() {
     touch_session_metadata "${branch}"
   fi
 
-  if [[ "${action}" != "Opened" ]]; then
+  remember_branch_workspace "${branch}" "${requested_mode}" "${path}"
+
+  if [[ "${action}" != "Opened" && "${requested_mode}" == "worktree" ]]; then
     apply_shared_paths "${path}"
     run_configured_hook "post-create" "${path}" "${branch}" "${path}"
   fi
@@ -1881,7 +2091,7 @@ command_issue() {
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --shell-output|--editor|--no-editor|--codex|--vscode)
+      --shell-output|--editor|--no-editor|--codex|--vscode|--solo|--worktree)
         ;;
       --agent|--task)
         local flag_name
@@ -2067,17 +2277,33 @@ command_submit() {
 }
 
 command_enter() {
-  local branch path shell_output
+  local branch path shell_output backing editor_mode workspace_app workspace_app_override open_editor
   local -a name_parts
   require_repo
 
   shell_output="false"
+  workspace_app_override=""
+  open_editor=""
   name_parts=()
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --shell-output)
         shell_output="true"
+        ;;
+      --editor)
+        open_editor="always"
+        ;;
+      --no-editor)
+        open_editor="never"
+        ;;
+      --codex)
+        workspace_app_override="codex"
+        open_editor="always"
+        ;;
+      --vscode)
+        workspace_app_override="vscode"
+        open_editor="always"
         ;;
       -h|--help)
         print_help
@@ -2091,12 +2317,45 @@ command_enter() {
   done
 
   branch="$(resolve_vibe_branch "${name_parts[@]}")"
+  backing="$(vibe_backing_for_branch "${branch}")"
   touch_session_metadata "${branch}"
-  path="$(worktree_path_for_branch "${branch}")"
+
+  if [[ "${backing}" == "worktree" ]]; then
+    path="$(worktree_path_for_branch "${branch}")"
+  else
+    path="$(repo_root)"
+    if [[ "$(current_branch)" != "${branch}" ]]; then
+      ensure_clean_tree "${path}"
+      git -C "${path}" switch "${branch}" >/dev/null
+    fi
+  fi
 
   say "Entering ${branch}"
   say "Path: ${path}"
   print_vibe_context "${branch}" "${path}"
+
+  if [[ "${shell_output}" != "true" ]]; then
+    editor_mode="never"
+    if [[ "${backing}" == "solo" ]]; then
+      editor_mode="$(open_editor_mode)"
+    fi
+    if [[ -n "${open_editor}" ]]; then
+      editor_mode="${open_editor}"
+    fi
+
+    if should_open_editor "${editor_mode}"; then
+      workspace_app="$(workspace_app_setting)"
+      if [[ -n "${workspace_app_override}" ]]; then
+        workspace_app="${workspace_app_override}"
+      fi
+      workspace_app="$(resolve_workspace_app "${workspace_app}")"
+      if [[ -n "${workspace_app}" ]]; then
+        open_workspace_for_path "${path}" "${workspace_app}"
+      else
+        say "Workspace: skipped (no supported app found)"
+      fi
+    fi
+  fi
 
   if [[ "${shell_output}" == "true" ]]; then
     say_shell_chdir "${path}"
@@ -2104,7 +2363,7 @@ command_enter() {
 }
 
 command_open() {
-  local branch path workspace_app
+  local branch path workspace_app backing
   local -a name_parts
   require_repo
 
@@ -2131,8 +2390,19 @@ command_open() {
   done
 
   branch="$(resolve_vibe_branch "${name_parts[@]}")"
+  backing="$(vibe_backing_for_branch "${branch}")"
   touch_session_metadata "${branch}"
-  path="$(worktree_path_for_branch "${branch}")"
+
+  if [[ "${backing}" == "worktree" ]]; then
+    path="$(worktree_path_for_branch "${branch}")"
+  else
+    path="$(repo_root)"
+    if [[ "$(current_branch)" != "${branch}" ]]; then
+      ensure_clean_tree "${path}"
+      git -C "${path}" switch "${branch}" >/dev/null
+    fi
+  fi
+
   workspace_app="$(resolve_workspace_app "${workspace_app}")"
   [[ -n "${workspace_app}" ]] || die "no supported workspace app found; install 'code' or 'codex'"
 
@@ -2168,13 +2438,17 @@ command_diff() {
 
   branch="$(resolve_vibe_branch "$@")"
   touch_session_metadata "${branch}"
-  path="$(worktree_path_for_branch "${branch}")"
+  path="$(vibe_path_for_branch "${branch}")"
   base="$(base_branch)"
-  merge_base="$(vibe_merge_base "${base}" "${path}")"
+  merge_base="$(vibe_merge_base "${base}" "${path}" "${branch}")"
 
-  git -C "${path}" diff "${merge_base}"
+  if accessible_worktree_path "${path}" && [[ "$(current_branch_at_path "${path}")" == "${branch}" ]]; then
+    git -C "${path}" diff "${merge_base}"
+  else
+    git diff "${merge_base}..${branch}"
+  fi
 
-  untracked_files="$(vibe_untracked_files "${path}")"
+  untracked_files="$(vibe_untracked_files "${path}" "${branch}")"
   if [[ -n "${untracked_files}" ]]; then
     say ""
     say "Untracked files:"
@@ -2183,7 +2457,7 @@ command_diff() {
 }
 
 command_finish() {
-  local name branch slug path mode sync base merged_into shell_output base_path delete_remote delete_remote_override
+  local name branch slug path mode sync base merged_into shell_output base_path delete_remote delete_remote_override backing active_path
   local -a name_parts
   require_repo
 
@@ -2247,15 +2521,19 @@ command_finish() {
   fi
 
   branch_exists "${branch}" || die "branch ${branch} does not exist locally"
-  path="$(find_worktree_for_branch "${branch}" || true)"
-  [[ -n "${path}" ]] || path="$(worktree_path_for_slug "${slug}")"
+  backing="$(vibe_backing_for_branch "${branch}")"
+  active_path="$(find_worktree_for_branch "${branch}" || true)"
+  path="$(vibe_path_for_branch "${branch}")"
+  if [[ "${backing}" == "solo" ]]; then
+    base_path="$(repo_root)"
+  fi
 
   if [[ "${sync}" == "true" ]]; then
     run_fetch
   fi
 
-  if [[ -d "${path}" ]]; then
-    ensure_clean_tree "${path}"
+  if [[ -n "${active_path}" && -d "${active_path}" ]]; then
+    ensure_clean_tree "${active_path}"
   fi
 
   merged_into=""
@@ -2263,13 +2541,24 @@ command_finish() {
   if is_ancestor_of "${branch}" "${base}"; then
     merged_into="${base}"
   elif remote_branch_exists "origin/${base}" && is_ancestor_of "${branch}" "origin/${base}"; then
-    sync_base_branch
-    base_path="$(base_worktree_path || true)"
-    [[ -n "${base_path}" ]] || base_path="$(repo_root)"
+    if [[ "${backing}" == "worktree" ]]; then
+      sync_base_branch
+      base_path="$(base_worktree_path || true)"
+      [[ -n "${base_path}" ]] || base_path="$(repo_root)"
+    else
+      base_path="$(repo_root)"
+      ensure_clean_tree "${base_path}"
+      git -C "${base_path}" switch "${base}" >/dev/null 2>&1 || true
+      git -C "${base_path}" merge --ff-only "origin/${base}" >/dev/null
+    fi
     merged_into="origin/${base}"
   elif [[ "${mode}" == "local" ]]; then
-    base_path="$(base_worktree_path || true)"
-    [[ -n "${base_path}" ]] || die "could not find a worktree for ${base}"
+    if [[ "${backing}" == "worktree" ]]; then
+      base_path="$(base_worktree_path || true)"
+      [[ -n "${base_path}" ]] || die "could not find a worktree for ${base}"
+    else
+      base_path="$(repo_root)"
+    fi
     ensure_clean_tree "${base_path}"
     git -C "${base_path}" switch "${base}" >/dev/null 2>&1 || true
     git -C "${base_path}" merge --ff-only "${branch}"
@@ -2281,7 +2570,11 @@ command_finish() {
   [[ -n "${base_path}" ]] || die "could not find a stable worktree for ${base}"
 
   if [[ -d "${path}" ]]; then
-    run_configured_hook "pre-finish" "${path}" "${branch}" "${path}"
+    if [[ "${backing}" == "worktree" ]]; then
+      run_configured_hook "pre-finish" "${path}" "${branch}" "${path}"
+    else
+      run_configured_hook "pre-finish" "${base_path}" "${branch}" "${path}"
+    fi
   else
     run_configured_hook "pre-finish" "${base_path}" "${branch}" "${path}"
   fi
@@ -2296,12 +2589,17 @@ command_finish() {
   (
     cd "${base_path}" >/dev/null 2>&1 || die "could not enter ${base_path}"
 
-    if [[ -d "${path}" ]]; then
+    if [[ "$(current_branch)" != "${base}" ]]; then
+      git switch "${base}" >/dev/null 2>&1 || true
+    fi
+
+    if [[ "${backing}" == "worktree" && -d "${path}" ]]; then
       git worktree remove "${path}"
     fi
 
     git branch -d "${branch}" >/dev/null
     clear_session_metadata "${branch}"
+    clear_branch_workspace "${branch}"
     git worktree prune >/dev/null 2>&1 || true
   )
 
@@ -2432,23 +2730,39 @@ repair_worktree_metadata() {
 
 command_list() {
   local base branch path head detached bare locked locked_reason prunable prunable_reason
-  local state ahead session changes found
+  local state ahead session changes found record display_path
   require_repo
   base="$(base_branch)"
   found="false"
 
-  while IFS=$'\t' read -r branch path head detached bare locked locked_reason prunable prunable_reason; do
+  while IFS= read -r branch; do
+    [[ -n "${branch}" ]] || continue
+
+    path=""
+    head=""
+    detached="false"
+    bare="false"
+    locked="false"
+    locked_reason=""
+    prunable="false"
+    prunable_reason=""
+    record="$(worktree_record_for_branch "${branch}" || true)"
+    if [[ -n "${record}" ]]; then
+      IFS=$'\t' read -r branch path head detached bare locked locked_reason prunable prunable_reason <<< "${record}"
+    fi
+
     if [[ "${found}" == "false" ]]; then
       printf '%-32s %-18s %-10s %-32s %-32s %s\n' "BRANCH" "STATE" "AHEAD" "SESSION" "CHANGES" "PATH"
       found="true"
     fi
 
-    state="$(worktree_state_label "${path}" "${locked}" "${prunable}")"
+    display_path="${path:-$(vibe_path_for_branch "${branch}")}"
+    state="$(vibe_state_label "${branch}" "${path}" "${locked}" "${prunable}")"
     ahead="$(vibe_ahead_behind_summary "${base}" "${branch}")"
     session="$(session_summary_for_branch "${branch}")"
-    changes="$(worktree_change_summary "${base}" "${branch}" "${path}")"
-    printf '%-32s %-18s %-10s %-32s %-32s %s\n' "${branch}" "${state}" "${ahead}" "${session}" "${changes}" "${path}"
-  done < <(list_vibes_raw)
+    changes="$(worktree_change_summary "${base}" "${branch}" "${display_path}")"
+    printf '%-32s %-18s %-10s %-32s %-32s %s\n' "${branch}" "${state}" "${ahead}" "${session}" "${changes}" "${display_path}"
+  done < <(local_vibe_branches_raw)
 
   if [[ "${found}" == "false" ]]; then
     say "No active vibes"
@@ -2456,7 +2770,7 @@ command_list() {
 }
 
 command_status() {
-  local base current prefix root editor_mode workspace_app issue_style delete_remote_finish shared_paths branch path
+  local base current prefix root editor_mode workspace_app issue_style delete_remote_finish shared_paths branch path mode
   local repo_config_path hooks_summary
   local -a name_parts
   require_repo
@@ -2479,6 +2793,7 @@ command_status() {
   current="$(current_branch)"
   prefix="$(branch_prefix)"
   root="$(vibe_root)"
+  mode="$(vibe_mode_setting)"
   editor_mode="$(open_editor_mode)"
   workspace_app="$(workspace_app_setting)"
   issue_style="$(issue_branch_style)"
@@ -2490,12 +2805,14 @@ command_status() {
   validate_workspace_app "${workspace_app}"
   validate_issue_branch_style "${issue_style}"
   validate_delete_remote_on_finish "${delete_remote_finish}"
+  validate_vibe_mode "${mode}"
 
   say "Repo: $(repo_root)"
   say "Repo config: ${repo_config_path:-none}"
   say "Base branch: ${base}"
   say "Current branch: ${current}"
   say "Branch prefix: ${prefix}"
+  say "Mode: ${mode}"
   say "Vibe root: ${root}"
   say "Open editor: ${editor_mode}"
   say "Open workspace with: ${workspace_app}"
@@ -2508,7 +2825,7 @@ command_status() {
   if [[ ${#name_parts[@]} -gt 0 ]]; then
     branch="$(resolve_vibe_branch "${name_parts[@]}")"
     touch_session_metadata "${branch}"
-    path="$(worktree_path_for_branch "${branch}")"
+    path="$(vibe_path_for_branch "${branch}")"
     print_vibe_context "${branch}" "${path}"
     print_pr_context "${branch}"
     return 0
@@ -2546,8 +2863,11 @@ command_path() {
     slug="$(slug_from_branch "${branch}")"
   fi
 
-  path="$(find_worktree_for_branch "${branch}" || true)"
-  printf '%s\n' "${path:-$(worktree_path_for_slug "${slug}")}"
+  if branch_exists "${branch}"; then
+    printf '%s\n' "$(vibe_path_for_branch "${branch}")"
+  else
+    printf '%s\n' "$(worktree_path_for_slug "${slug}")"
+  fi
 }
 
 command_prune() {

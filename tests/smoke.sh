@@ -16,6 +16,10 @@ CONFIG_WORKTREE_DIR="${TMP_DIR}/repo-vibes/config-demo/repo-config-demo"
 WORKTREE_FINISH_DIR="${TMP_DIR}/.vibe/demo/worktree-finish"
 ISSUE_WORKTREE_DIR="${TMP_DIR}/.vibe/demo/9-issue-aware-vibe-creation"
 TITLE_ONLY_ISSUE_WORKTREE_DIR="${TMP_DIR}/.vibe/demo/issue-title-only-branch"
+SOLO_MODE_WORKTREE_DIR="${TMP_DIR}/.vibe/demo/solo-mode"
+SOLO_ISSUE_WORKTREE_DIR="${TMP_DIR}/.vibe/demo/11-solo-mode-issue"
+SOLO_WORKTREE_OVERRIDE_DIR="${TMP_DIR}/.vibe/demo/solo-worktree-override"
+FORCED_SOLO_OVERRIDE_DIR="${TMP_DIR}/.vibe/demo/forced-solo-override"
 SESSION_WORKTREE_DIR="${TMP_DIR}/.vibe/demo/session-demo"
 DOCTOR_DIRTY_WORKTREE_DIR="${TMP_DIR}/.vibe/demo/doctor-dirty"
 DOCTOR_STALE_WORKTREE_DIR="${TMP_DIR}/.vibe/demo/doctor-stale"
@@ -36,6 +40,7 @@ CODE_LOG="${TMP_DIR}/code.log"
 CODEX_LOG="${TMP_DIR}/codex.log"
 ISSUE_9_TITLE_FILE="${TMP_DIR}/issue-9-title.txt"
 ISSUE_10_TITLE_FILE="${TMP_DIR}/issue-10-title.txt"
+ISSUE_11_TITLE_FILE="${TMP_DIR}/issue-11-title.txt"
 PR_NUMBER_FILE="${TMP_DIR}/pr-number.txt"
 PR_URL_FILE="${TMP_DIR}/pr-url.txt"
 PR_TITLE_FILE="${TMP_DIR}/pr-title.txt"
@@ -104,6 +109,9 @@ if [ "\${1:-}" = "issue" ] && [ "\${2:-}" = "view" ]; then
       ;;
     10)
       title="\$(<"${ISSUE_10_TITLE_FILE}")"
+      ;;
+    11)
+      title="\$(<"${ISSUE_11_TITLE_FILE}")"
       ;;
     *)
       printf 'fake gh: unknown issue %s\n' "\${number}" >&2
@@ -221,6 +229,7 @@ chmod +x "${FAKE_BIN_DIR}/gh"
 
 printf 'Issue aware vibe creation\n' > "${ISSUE_9_TITLE_FILE}"
 printf 'Issue title only branch\n' > "${ISSUE_10_TITLE_FILE}"
+printf 'Solo mode issue\n' > "${ISSUE_11_TITLE_FILE}"
 printf '24\n' > "${PR_NUMBER_FILE}"
 printf 'https://github.com/sailscastshq/git-vibe/pull/24\n' > "${PR_URL_FILE}"
 
@@ -247,6 +256,7 @@ VIBE_ALLOW_COMMIT_BASE=1 git -C "${REPO_DIR}" commit -m "chore: initial commit" 
 git -C "${REPO_DIR}" remote add origin "${ORIGIN_DIR}"
 git -C "${REPO_DIR}" config vibe.baseBranch main
 git -C "${REPO_DIR}" config vibe.branchPrefix feat/
+git -C "${REPO_DIR}" config vibe.mode worktree
 git -C "${REPO_DIR}" config vibe.worktreeRoot ../.vibe
 git -C "${REPO_DIR}" config vibe.disallowPushOnBase false
 git -C "${REPO_DIR}" push -u origin main >/dev/null
@@ -264,6 +274,7 @@ printf '0.0.0\n' > "${CONFIG_REPO_DIR}/VERSION"
 printf 'node_modules/\n.venv/\n' > "${CONFIG_REPO_DIR}/.gitignore"
 cat > "${CONFIG_REPO_DIR}/vibe.toml" <<EOF
 [vibe]
+mode = "worktree"
 worktreeRoot = "../repo-vibes"
 openEditor = "never"
 openWorkspaceWith = "vscode"
@@ -287,6 +298,7 @@ printf 'module.exports = {}\n' > "${CONFIG_REPO_DIR}/node_modules/sails/index.js
 printf '#!/usr/bin/env bash\n' > "${CONFIG_REPO_DIR}/.venv/bin/python"
 
 git config --file "${CONFIG_GLOBAL_FILE}" vibe.worktreeRoot ../global-vibes
+git config --file "${CONFIG_GLOBAL_FILE}" vibe.mode solo
 git config --file "${CONFIG_GLOBAL_FILE}" vibe.openEditor always
 git config --file "${CONFIG_GLOBAL_FILE}" vibe.deleteRemoteOnFinish false
 
@@ -296,12 +308,14 @@ CONFIG_STATUS_OUTPUT="$(
 )"
 [[ "${CONFIG_STATUS_OUTPUT}" == *"Repo config: ${CONFIG_REPO_DIR}/vibe.toml"* ]] || fail "check did not show the checked-in vibe.toml path"
 [[ "${CONFIG_STATUS_OUTPUT}" == *"Vibe root: ${TMP_DIR}/repo-vibes/config-demo"* ]] || fail "repo vibe.toml should override the global worktree root"
+[[ "${CONFIG_STATUS_OUTPUT}" == *"Mode: worktree"* ]] || fail "repo vibe.toml should override the global mode"
 [[ "${CONFIG_STATUS_OUTPUT}" == *"Open editor: never"* ]] || fail "repo vibe.toml should override the global openEditor setting"
 [[ "${CONFIG_STATUS_OUTPUT}" == *"Delete remote on finish: true"* ]] || fail "repo vibe.toml should override the global deleteRemoteOnFinish setting"
 [[ "${CONFIG_STATUS_OUTPUT}" == *"Shared paths: node_modules, .venv"* ]] || fail "check did not summarize repo-configured shared paths"
 [[ "${CONFIG_STATUS_OUTPUT}" == *"Hooks: post-create, pre-finish, pre-release"* ]] || fail "check did not summarize the configured lifecycle hooks"
 
 git -C "${CONFIG_REPO_DIR}" config vibe.worktreeRoot ../local-vibes
+git -C "${CONFIG_REPO_DIR}" config vibe.mode solo
 git -C "${CONFIG_REPO_DIR}" config vibe.openEditor auto
 git -C "${CONFIG_REPO_DIR}" config vibe.deleteRemoteOnFinish false
 
@@ -310,11 +324,13 @@ CONFIG_LOCAL_OVERRIDE_OUTPUT="$(
   GIT_CONFIG_GLOBAL="${CONFIG_GLOBAL_FILE}" "${ROOT}/bin/git-vibe" check
 )"
 [[ "${CONFIG_LOCAL_OVERRIDE_OUTPUT}" == *"Vibe root: ${TMP_DIR}/local-vibes/config-demo"* ]] || fail "local git config should override the checked-in vibe.toml worktree root"
+[[ "${CONFIG_LOCAL_OVERRIDE_OUTPUT}" == *"Mode: solo"* ]] || fail "local git config should override the checked-in vibe.toml mode"
 [[ "${CONFIG_LOCAL_OVERRIDE_OUTPUT}" == *"Open editor: auto"* ]] || fail "local git config should override the checked-in vibe.toml openEditor setting"
 [[ "${CONFIG_LOCAL_OVERRIDE_OUTPUT}" == *"Delete remote on finish: false"* ]] || fail "local git config should override the checked-in vibe.toml deleteRemoteOnFinish setting"
 [[ "${CONFIG_LOCAL_OVERRIDE_OUTPUT}" == *"Shared paths: node_modules, .venv"* ]] || fail "local git config should still inherit shared paths from repo vibe.toml"
 
 git -C "${CONFIG_REPO_DIR}" config --unset vibe.worktreeRoot
+git -C "${CONFIG_REPO_DIR}" config --unset vibe.mode
 git -C "${CONFIG_REPO_DIR}" config --unset vibe.openEditor
 git -C "${CONFIG_REPO_DIR}" config --unset vibe.deleteRemoteOnFinish
 
@@ -578,6 +594,161 @@ git -C "${REPO_DIR}" config --unset vibe.issueBranchStyle
 git -C "${REPO_DIR}" config --unset vibe.deleteRemoteOnFinish
 
 printf 'smoke: issue flow ok\n'
+
+git -C "${REPO_DIR}" config vibe.mode solo
+
+SOLO_CODE_OUTPUT="$(
+  cd "${REPO_DIR}" >/dev/null
+  "${ROOT}/bin/git-vibe" code solo-mode
+)"
+[[ ! -d "${SOLO_MODE_WORKTREE_DIR}" ]] || fail "solo mode should not create a worktree for code"
+[[ "${SOLO_CODE_OUTPUT}" == *"Started feat/solo-mode"* ]] || fail "solo mode code did not create the expected branch"
+[[ "${SOLO_CODE_OUTPUT}" == *"Backing: solo"* ]] || fail "solo mode code did not print the solo backing"
+[[ "${SOLO_CODE_OUTPUT}" == *"Path: ${REPO_DIR}"* ]] || fail "solo mode code did not use the repo root path"
+[[ "$(git -C "${REPO_DIR}" branch --show-current)" == "feat/solo-mode" ]] || fail "solo mode code did not switch the current checkout"
+
+printf '\nSolo mode change\n' >> "${REPO_DIR}/README.md"
+git -C "${REPO_DIR}" add README.md
+git -C "${REPO_DIR}" commit -m "feat: update readme in solo mode" >/dev/null
+
+SOLO_PATH_OUTPUT="$(
+  cd "${REPO_DIR}" >/dev/null
+  "${ROOT}/bin/git-vibe" path solo-mode
+)"
+[[ "${SOLO_PATH_OUTPUT}" == "${REPO_DIR}" ]] || fail "path should return the repo root for a solo vibe"
+
+git -C "${REPO_DIR}" switch main >/dev/null
+
+SOLO_LIST_OUTPUT="$(
+  cd "${REPO_DIR}" >/dev/null
+  "${ROOT}/bin/git-vibe" list
+)"
+[[ "${SOLO_LIST_OUTPUT}" == *"feat/solo-mode"* ]] || fail "list did not include the solo vibe branch"
+[[ "${SOLO_LIST_OUTPUT}" == *"branch-only"* ]] || fail "list did not label the inactive solo vibe as branch-only"
+[[ "${SOLO_LIST_OUTPUT}" == *"${REPO_DIR}"* ]] || fail "list did not show the repo root path for the solo vibe"
+
+SOLO_STATUS_OUTPUT="$(
+  cd "${REPO_DIR}" >/dev/null
+  "${ROOT}/bin/git-vibe" check solo-mode
+)"
+[[ "${SOLO_STATUS_OUTPUT}" == *"Mode: solo"* ]] || fail "check did not report solo mode"
+[[ "${SOLO_STATUS_OUTPUT}" == *"Backing: solo"* ]] || fail "check did not show the solo backing"
+[[ "${SOLO_STATUS_OUTPUT}" == *"Working tree: branch is not currently checked out in this path"* ]] || fail "check did not explain inactive solo branch state"
+
+SOLO_ENTER_OUTPUT="$(
+  cd "${REPO_DIR}" >/dev/null
+  "${ROOT}/bin/git-vibe" enter solo-mode --shell-output
+)"
+[[ "${SOLO_ENTER_OUTPUT}" == *"Entering feat/solo-mode"* ]] || fail "enter did not announce the solo vibe"
+[[ "${SOLO_ENTER_OUTPUT}" == *"__GIT_VIBE_CHDIR__=${REPO_DIR}"* ]] || fail "enter did not keep solo mode in the repo root"
+[[ "$(git -C "${REPO_DIR}" branch --show-current)" == "feat/solo-mode" ]] || fail "enter did not switch back to the solo vibe branch"
+
+git -C "${REPO_DIR}" switch main >/dev/null
+: > "${CODE_LOG}"
+
+SOLO_ENTER_OPEN_OUTPUT="$(
+  cd "${REPO_DIR}" >/dev/null
+  PATH="${FAKE_BIN_DIR}:$PATH" "${ROOT}/bin/git-vibe" enter --vscode solo-mode
+)"
+[[ "${SOLO_ENTER_OPEN_OUTPUT}" == *"Entering feat/solo-mode"* ]] || fail "enter --vscode did not target the solo vibe branch"
+[[ -s "${CODE_LOG}" ]] || fail "enter --vscode should launch VS Code for a solo vibe"
+[[ "$(<"${CODE_LOG}")" == *"${REPO_DIR}"* ]] || fail "enter --vscode should open the repo root for a solo vibe"
+[[ "$(git -C "${REPO_DIR}" branch --show-current)" == "feat/solo-mode" ]] || fail "enter --vscode did not switch to the solo vibe branch"
+
+git -C "${REPO_DIR}" switch main >/dev/null
+: > "${CODE_LOG}"
+
+SOLO_OPEN_OUTPUT="$(
+  cd "${REPO_DIR}" >/dev/null
+  PATH="${FAKE_BIN_DIR}:$PATH" "${ROOT}/bin/git-vibe" open --vscode solo-mode
+)"
+[[ "${SOLO_OPEN_OUTPUT}" == *"Opening feat/solo-mode"* ]] || fail "open did not target the solo vibe branch"
+[[ -s "${CODE_LOG}" ]] || fail "open --vscode should launch VS Code for a solo vibe"
+[[ "$(<"${CODE_LOG}")" == *"${REPO_DIR}"* ]] || fail "open --vscode should open the repo root for a solo vibe"
+[[ "$(git -C "${REPO_DIR}" branch --show-current)" == "feat/solo-mode" ]] || fail "open did not switch to the solo vibe branch"
+
+git -C "${REPO_DIR}" switch main >/dev/null
+
+SOLO_FINISH_OUTPUT="$(
+  cd "${REPO_DIR}" >/dev/null
+  "${ROOT}/bin/git-vibe" finish --local solo-mode
+)"
+[[ "${SOLO_FINISH_OUTPUT}" == *"Finished feat/solo-mode"* ]] || fail "finish --local did not close the solo vibe"
+[[ "$(git -C "${REPO_DIR}" branch --show-current)" == "main" ]] || fail "finish --local should leave solo mode on main"
+if git -C "${REPO_DIR}" show-ref --verify --quiet refs/heads/feat/solo-mode; then
+  fail "finish --local did not delete the solo vibe branch"
+fi
+
+: > "${CODE_LOG}"
+SOLO_START_OUTPUT="$(
+  cd "${REPO_DIR}" >/dev/null
+  PATH="${FAKE_BIN_DIR}:$PATH" "${ROOT}/bin/git-vibe" start start-solo
+)"
+[[ ! -d "${TMP_DIR}/.vibe/demo/start-solo" ]] || fail "solo mode start should not create a worktree"
+[[ "${SOLO_START_OUTPUT}" == *"Started feat/start-solo"* ]] || fail "start did not create the expected solo branch"
+[[ ! -s "${CODE_LOG}" ]] || fail "start should keep the editor closed"
+[[ "$(git -C "${REPO_DIR}" branch --show-current)" == "feat/start-solo" ]] || fail "start did not switch to the solo branch"
+git -C "${REPO_DIR}" switch main >/dev/null
+(
+  cd "${REPO_DIR}" >/dev/null
+  "${ROOT}/bin/git-vibe" finish start-solo >/dev/null
+)
+if git -C "${REPO_DIR}" show-ref --verify --quiet refs/heads/feat/start-solo; then
+  fail "finish did not delete the solo start branch"
+fi
+
+SOLO_ISSUE_OUTPUT="$(
+  cd "${REPO_DIR}" >/dev/null
+  PATH="${FAKE_BIN_DIR}:$PATH" "${ROOT}/bin/git-vibe" issue 11
+)"
+[[ ! -d "${SOLO_ISSUE_WORKTREE_DIR}" ]] || fail "solo mode issue should not create a worktree"
+[[ "${SOLO_ISSUE_OUTPUT}" == *"Started feat/11-solo-mode-issue"* ]] || fail "issue did not create the expected solo issue branch"
+[[ "$(git -C "${REPO_DIR}" branch --show-current)" == "feat/11-solo-mode-issue" ]] || fail "issue did not switch to the solo issue branch"
+git -C "${REPO_DIR}" switch main >/dev/null
+(
+  cd "${REPO_DIR}" >/dev/null
+  "${ROOT}/bin/git-vibe" finish 11 >/dev/null
+)
+if git -C "${REPO_DIR}" show-ref --verify --quiet refs/heads/feat/11-solo-mode-issue; then
+  fail "finish did not delete the solo issue branch"
+fi
+
+SOLO_WORKTREE_OVERRIDE_OUTPUT="$(
+  cd "${REPO_DIR}" >/dev/null
+  "${ROOT}/bin/git-vibe" code --worktree solo-worktree-override
+)"
+[[ -d "${SOLO_WORKTREE_OVERRIDE_DIR}" ]] || fail "--worktree should override solo mode and create a worktree"
+[[ "${SOLO_WORKTREE_OVERRIDE_OUTPUT}" == *"Path: ${SOLO_WORKTREE_OVERRIDE_DIR}"* ]] || fail "--worktree did not use the worktree path"
+git -C "${REPO_DIR}" worktree remove "${SOLO_WORKTREE_OVERRIDE_DIR}" >/dev/null
+git -C "${REPO_DIR}" branch -d feat/solo-worktree-override >/dev/null
+
+git -C "${REPO_DIR}" config --unset vibe.mode
+
+FORCED_SOLO_OUTPUT="$(
+  cd "${REPO_DIR}" >/dev/null
+  "${ROOT}/bin/git-vibe" code --solo forced-solo-override
+)"
+[[ ! -d "${FORCED_SOLO_OVERRIDE_DIR}" ]] || fail "--solo should override worktree mode and stay in the repo root"
+[[ "${FORCED_SOLO_OUTPUT}" == *"Started feat/forced-solo-override"* ]] || fail "--solo did not create the expected branch"
+[[ "$(git -C "${REPO_DIR}" branch --show-current)" == "feat/forced-solo-override" ]] || fail "--solo did not switch the current checkout"
+
+printf '\nForced solo override change\n' >> "${REPO_DIR}/README.md"
+git -C "${REPO_DIR}" add README.md
+git -C "${REPO_DIR}" commit -m "feat: update readme for forced solo override" >/dev/null
+
+FORCED_SOLO_FINISH_OUTPUT="$(
+  cd "${REPO_DIR}" >/dev/null
+  "${ROOT}/bin/git-vibe" finish --local
+)"
+[[ "${FORCED_SOLO_FINISH_OUTPUT}" == *"Finished feat/forced-solo-override"* ]] || fail "finish --local did not close the active solo branch"
+[[ "$(git -C "${REPO_DIR}" branch --show-current)" == "main" ]] || fail "finish --local without a name should leave solo mode on main"
+if git -C "${REPO_DIR}" show-ref --verify --quiet refs/heads/feat/forced-solo-override; then
+  fail "finish --local did not delete the active solo branch"
+fi
+
+git -C "${REPO_DIR}" config vibe.mode worktree
+
+printf 'smoke: solo mode ok\n'
 
 SESSION_CODE_OUTPUT="$(
   cd "${REPO_DIR}" >/dev/null
@@ -881,6 +1052,7 @@ git -C "${SHELL_REPO_DIR}" add README.md
 VIBE_ALLOW_COMMIT_BASE=1 git -C "${SHELL_REPO_DIR}" commit -m "chore: initial commit" >/dev/null
 git -C "${SHELL_REPO_DIR}" config vibe.baseBranch main
 git -C "${SHELL_REPO_DIR}" config vibe.branchPrefix feat/
+git -C "${SHELL_REPO_DIR}" config vibe.mode worktree
 git -C "${SHELL_REPO_DIR}" config vibe.worktreeRoot ../.vibe
 EXPECTED_SHELL_REPO_DIR="$(cd "${SHELL_REPO_DIR}" && pwd -P)"
 
@@ -912,5 +1084,35 @@ FINISH_OUTPUT="$(HOME="${INSTALL_HOME}" SHELL=/bin/bash bash -lc '
 ')"
 
 [[ "${FINISH_OUTPUT}" == "${EXPECTED_SHELL_REPO_DIR}" ]] || fail "shell integration did not return to the base worktree after finish"
+
+git -C "${SHELL_REPO_DIR}" config vibe.mode solo
+
+SOLO_AUTO_CD_OUTPUT="$(HOME="${INSTALL_HOME}" SHELL=/bin/bash bash -lc '
+  source ~/.bashrc
+  cd "'"${SHELL_REPO_DIR}"'"
+  git vc shell-solo >/dev/null
+  pwd -P
+')"
+[[ "${SOLO_AUTO_CD_OUTPUT}" == "${EXPECTED_SHELL_REPO_DIR}" ]] || fail "shell integration should stay in the repo root for solo mode"
+[[ "$(git -C "${SHELL_REPO_DIR}" branch --show-current)" == "feat/shell-solo" ]] || fail "git vc did not switch to the solo branch"
+
+SOLO_ENTER_SHELL_OUTPUT="$(HOME="${INSTALL_HOME}" SHELL=/bin/bash bash -lc '
+  source ~/.bashrc
+  cd "'"${SHELL_REPO_DIR}"'"
+  git switch main >/dev/null
+  git vibe enter shell-solo >/dev/null
+  pwd -P
+')"
+[[ "${SOLO_ENTER_SHELL_OUTPUT}" == "${EXPECTED_SHELL_REPO_DIR}" ]] || fail "shell enter should stay in the repo root for solo mode"
+[[ "$(git -C "${SHELL_REPO_DIR}" branch --show-current)" == "feat/shell-solo" ]] || fail "enter did not switch back to the solo branch"
+
+SOLO_FINISH_SHELL_OUTPUT="$(HOME="${INSTALL_HOME}" SHELL=/bin/bash bash -lc '
+  source ~/.bashrc
+  cd "'"${SHELL_REPO_DIR}"'"
+  git vibe finish >/dev/null
+  pwd -P
+')"
+[[ "${SOLO_FINISH_SHELL_OUTPUT}" == "${EXPECTED_SHELL_REPO_DIR}" ]] || fail "shell finish should leave solo mode in the repo root"
+[[ "$(git -C "${SHELL_REPO_DIR}" branch --show-current)" == "main" ]] || fail "finish did not return the solo shell repo to main"
 
 printf 'smoke: shell integration ok\n'
