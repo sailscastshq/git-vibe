@@ -1,6 +1,6 @@
 # Git Vibe
 
-Git Vibe is a lightweight Git workflow for teams that ship from `main`, keep all work on `feat/*` branches, and treat every `feat/*` branch as a worktree from the moment it is created.
+Git Vibe is a lightweight Git workflow for teams that ship from `main`, keep all work on `feat/*` branches, and want a worktree-first flow for parallel lanes without giving up a simpler solo mode for single-checkout work.
 
 The command surface is intentionally small:
 
@@ -23,7 +23,7 @@ The command surface is intentionally small:
 - `git vibe doctor [--repair]`
 - `git vibe prune`
 
-Under the hood, every vibe is a short-lived `feat/*` branch that is created as its own worktree. That gives humans and AI agents isolated lanes to work in without polluting `main`.
+Under the hood, every vibe is a short-lived `feat/*` branch. In the default `worktree` mode, Git Vibe opens that branch in its own worktree so humans and AI agents can work in isolated lanes without polluting `main`. In `solo` mode, Git Vibe creates or switches the branch in your current checkout instead.
 
 ## Why Git Vibe
 
@@ -31,13 +31,14 @@ Classic `git-flow` assumes a world with long-lived `develop` branches, release b
 
 - `main` is the only long-lived branch.
 - Every work branch starts as `feat/<slug>`, including fixes and urgent patches.
-- Every `feat/*` branch is created as its own worktree.
+- `worktree` mode gives each `feat/*` branch its own worktree.
+- `solo` mode keeps the `feat/*` branch in your current checkout.
 - `main` stays clean and deployable.
 - Releases are cut directly from `main` with a release commit and a tag.
 
 This is a better fit for fast-moving teams and AI-assisted development, where multiple experiments can happen in parallel and isolation matters more than branch hierarchy.
 
-Git Vibe is also built for AI orchestration. When every `feat/*` branch gets its own worktree by default, you can safely run multiple agents, terminals, test runs, and experiments side by side without branch hopping, stash juggling, or cross-task contamination.
+Git Vibe is also built for AI orchestration. When `worktree` mode is active, you can safely run multiple agents, terminals, test runs, and experiments side by side without branch hopping, stash juggling, or cross-task contamination. When you are working solo and mostly want `git switch`, `npm run dev`, and UI iteration in one checkout, `solo` mode keeps the workflow lighter.
 
 ## What the workflow includes
 
@@ -46,8 +47,8 @@ Git Vibe is also built for AI orchestration. When every `feat/*` branch gets its
 - Global hook wrappers for `pre-commit`, `commit-msg`, and `pre-push`
 - Semantic commit enforcement
 - Base-branch protection against direct commits and pushes
-- Default worktree layout under `../.vibe/<repo>/<slug>`
-- A simple workflow for human and AI parallel work without `develop`, `fix/*`, or `release/*` branches
+- Default worktree layout under `../.vibe/<repo>/<slug>` when `worktree` mode is active
+- A worktree-first workflow for parallel human and AI work, with an opt-in `solo` mode for one-checkout branch work
 
 ## Install
 
@@ -136,6 +137,35 @@ git vibe pr
 git vibe submit
 ```
 
+## Choosing a mode
+
+Git Vibe stays `worktree`-first by default because that is still the safest path for parallel human and AI work.
+
+Use `worktree` when:
+
+- you want one task per isolated directory
+- you are running multiple agents or experiments in parallel
+- you want the editor and shell to jump to a separate lane automatically
+
+Use `solo` when:
+
+- you usually have one active branch at a time
+- you mostly want `git switch`, `npm run dev`, and quick UI iteration
+- you want the editor to stay pointed at the same checkout while the branch changes underneath it
+
+Set your personal default with:
+
+```bash
+git config --global vibe.mode solo
+```
+
+Or keep the global default and override one command at a time:
+
+```bash
+git vibe code --solo polish-pricing-copy
+git vibe code --worktree stabilize-release-flow
+```
+
 ## Workflow
 
 Start a vibe from a clean `main` checkout:
@@ -146,18 +176,20 @@ git pull --ff-only origin main
 git vibe code fallback-app-urls
 ```
 
-That creates:
+In the default `worktree` mode, that creates:
 
 - branch: `feat/fallback-app-urls`
 - worktree: `../.vibe/<repo>/fallback-app-urls`
 
 Do all work inside that worktree. Even fixes and urgent patches still live under `feat/*`.
 
-If you rerun `git vibe code fallback-app-urls`, Git Vibe reopens the existing worktree instead of creating a duplicate branch.
+If you prefer a single-checkout flow, set `vibe.mode=solo`. Then the same command creates or switches to `feat/fallback-app-urls` in your current checkout instead of opening a second path.
+
+If you rerun `git vibe code fallback-app-urls`, Git Vibe reopens the existing vibe instead of creating a duplicate branch. That means reopening the worktree in `worktree` mode, or switching back to the branch in your current checkout in `solo` mode.
 
 If you start from an issue number, Git Vibe fetches the issue title through `gh` and creates a deterministic branch such as `feat/9-issue-aware-vibe-creation`. Later reruns of `git vibe code 9` or `git vibe issue 9` reopen that same vibe even if the issue title changes on GitHub.
 
-When it opens or reopens a vibe, Git Vibe also prints a short workspace summary with the branch, base, path, compare target, and current change state. That makes the worktree feel anchored even in tools that do not visibly switch context for you.
+When it opens or reopens a vibe, Git Vibe also prints a short workspace summary with the branch, base, backing, path, compare target, and current change state. That keeps the lane anchored whether the vibe lives in a separate worktree or in your current checkout.
 
 If you attach session metadata, that summary also carries the session label, task, and last activity timestamp. That gives each vibe a lightweight memory so it is easier to come back later and understand what the lane was for.
 
@@ -217,9 +249,9 @@ git vibe doctor
 
 ## Commands
 
-### `git vibe code [--editor] [--no-editor] [--codex|--vscode] <name|number>`
+### `git vibe code [--solo|--worktree] [--editor] [--no-editor] [--codex|--vscode] <name|number>`
 
-Creates or reopens a `feat/<slug>` worktree. If the vibe does not exist yet, Git Vibe creates the branch from `main` and opens it. If it already exists, Git Vibe jumps back into that same worktree instead of creating a duplicate.
+Creates or reopens a `feat/<slug>` vibe. If the vibe does not exist yet, Git Vibe creates the branch from `main` and opens it using the effective mode. If it already exists, Git Vibe reopens the existing backing instead of creating a duplicate lane.
 
 Example:
 
@@ -239,15 +271,15 @@ Workspace launch follows `vibe.openEditor`, which accepts `auto`, `always`, or `
 - `always` opens your configured workspace app whenever its CLI is available
 - `never` skips workspace launch
 
-Use `--editor` or `--no-editor` to override the launch policy for a single run. Use `--codex` or `--vscode` when you want to force a specific app for that one command.
+Use `--solo` or `--worktree` to override the configured workflow mode for one run. Use `--editor` or `--no-editor` to override the launch policy for a single run. Use `--codex` or `--vscode` when you want to force a specific app for that one command.
 
-After opening a vibe, Git Vibe prints a context summary with the branch, base, path, compare target, and current change state so you can orient yourself quickly in Codex, VS Code, or a plain terminal.
+After opening a vibe, Git Vibe prints a context summary with the branch, base, backing, path, compare target, and current change state so you can orient yourself quickly in Codex, VS Code, or a plain terminal.
 
-Fresh vibes also inherit shared runtime paths from the primary checkout before any `post-create` hook runs. By default that means `node_modules` when the base checkout already has it. You can extend or replace that list with `vibe.sharedPaths` or `[vibe].sharedPaths` in `vibe.toml`.
+Fresh worktree-backed vibes also inherit shared runtime paths from the primary checkout before any `post-create` hook runs. By default that means `node_modules` when the base checkout already has it. You can extend or replace that list with `vibe.sharedPaths` or `[vibe].sharedPaths` in `vibe.toml`.
 
 If you pass `--agent <agent>` or `--task <task>`, Git Vibe also records lightweight session metadata for that vibe.
 
-### `git vibe issue [--editor] [--no-editor] [--codex|--vscode] [--agent <agent>] [--task <task>] <number>`
+### `git vibe issue [--solo|--worktree] [--editor] [--no-editor] [--codex|--vscode] [--agent <agent>] [--task <task>] <number>`
 
 Explicit issue-first alias for `git vibe code <number>`.
 
@@ -277,29 +309,33 @@ Creates a pull request for the current vibe, or for the named vibe when run from
 
 Alias for `git vibe pr`.
 
-### `git vibe enter [name]`
+### `git vibe enter [--editor|--no-editor] [--codex|--vscode] [name]`
 
-Jumps back into an existing vibe worktree and prints the same focused context summary.
+Jumps back into an existing vibe and prints the same focused context summary.
 
 - run it from `main` with a vibe name when you want to reopen a specific lane
 - run it inside a vibe with no name to confirm where you are and re-anchor the current workspace
-- shell integration uses it for an explicit "take me there" flow when `git vibe code ...` was not the command that opened your current terminal
+- in `worktree` mode it jumps back into the separate worktree path
+- in `solo` mode it switches the current checkout back to the vibe branch, keeps the same repo path, and follows the normal editor-launch policy so the same checkout can reopen in your workspace app
+- shell integration uses it for an explicit "take me there" flow whether that means changing directories or only switching branches
+- use `--codex`, `--vscode`, `--editor`, or `--no-editor` when you want to override that behavior for one run
 - if the vibe has saved session metadata, `enter` also shows that context again so resuming the lane feels less guessy
 
 ### `git vibe open [--codex|--vscode] [name]`
 
 Reopens an existing vibe in Codex Desktop or VS Code and prints the same focused context summary.
 
-- run it from `main` with a vibe name when the shell is in one place but you want the app to follow the worktree
+- run it from `main` with a vibe name when the shell is in one place but you want the app to follow the vibe backing
 - run it inside a vibe with no name to reopen the current lane in your workspace app
+- in `solo` mode it switches the branch first, then reopens the same checkout in the workspace app
 - use `--codex` or `--vscode` to force a target app for one run
 
 ### `git vibe diff [name]`
 
 Shows the current vibe's cumulative diff against its base branch.
 
-- run it inside a vibe worktree with no name to inspect the current lane
-- pass a vibe name from `main` when you want to inspect another active worktree
+- run it inside an active vibe with no name to inspect the current lane
+- pass a vibe name from `main` when you want to inspect another vibe, even if that branch is not currently checked out
 - untracked files are called out explicitly so they do not disappear from the mental model
 
 ### `git vibe finish [--local] [--sync] [--delete-remote|--keep-remote] [name]`
@@ -307,14 +343,14 @@ Shows the current vibe's cumulative diff against its base branch.
 Finishes a vibe safely.
 
 - With no flag, `git vibe finish <name>` uses the default auto mode. It checks local `main` and your current `origin/main` refs, then cleans up if the branch is already merged.
-- If the branch is already merged into local `main`, it cleans up the worktree and deletes the branch.
+- If the branch is already merged into local `main`, it cleans up the vibe and deletes the branch.
 - If the branch is merged into `origin/main`, it fast-forwards local `main`, then cleans up.
 - If you pass `--local`, it merges the branch into local `main` with `--ff-only`, then cleans up.
 - If you pass `--sync`, it fetches `origin/main` first, then runs the same cleanup check with fresh remote refs.
 - If you pass `--delete-remote`, Git Vibe also deletes `origin/<branch>` after merge verification and before local cleanup.
 - If you pass `--keep-remote`, it skips remote deletion even when the repo config would normally do it.
 
-Run it with no name from inside a feature worktree to finish the current vibe.
+Run it with no name from inside a feature branch to finish the current vibe. In `solo` mode, Git Vibe switches the current checkout back to `main` before deleting the branch.
 
 Use `finish` when the branch lifecycle is complete. Use `doctor` or `prune` when the branch is still open but the worktree metadata got out of sync.
 
@@ -459,6 +495,7 @@ Example `vibe.toml`:
 
 ```toml
 [vibe]
+mode = "worktree"
 baseBranch = "main"
 branchPrefix = "feat/"
 worktreeRoot = "../.vibe"
@@ -480,6 +517,7 @@ pre-release = "npm test"
 
 Supported `[vibe]` keys:
 
+- `mode`
 - `baseBranch`
 - `branchPrefix`
 - `worktreeRoot`
@@ -504,6 +542,20 @@ git config --global vibe.branchPrefix feat/
 git config --global vibe.worktreeRoot ../.vibe
 ```
 
+Workflow mode:
+
+```bash
+git config --global vibe.mode solo
+git config vibe.mode worktree
+```
+
+Supported values are:
+
+- `worktree` to keep the current Git Vibe behavior, where each vibe gets its own worktree
+- `solo` to create or switch the vibe branch in your current checkout instead
+
+`worktree` remains the built-in default. `worktreeRoot` only matters when the effective mode is `worktree`.
+
 Useful repo-level override example:
 
 ```bash
@@ -525,6 +577,8 @@ git config vibe.openWorkspaceWith codex
 ```
 
 `vibe.openWorkspaceWith=auto` prefers Codex Desktop inside a Codex shell and otherwise uses VS Code when available.
+
+If your usual solo flow is "switch the branch and reopen the same checkout in VS Code," set `vibe.mode=solo` and `vibe.openWorkspaceWith=vscode`.
 
 Issue-driven branch naming:
 
@@ -548,7 +602,7 @@ git config --global vibe.sharedPaths node_modules
 git config vibe.sharedPaths "node_modules,.venv"
 ```
 
-`vibe.sharedPaths` is a comma-separated list of relative repo paths to symlink from the primary checkout into fresh vibes before `post-create` runs. Git Vibe also adds those linked paths to the worktree-local exclude file so the new vibe stays clean.
+`vibe.sharedPaths` is a comma-separated list of relative repo paths to symlink from the primary checkout into fresh worktree-backed vibes before `post-create` runs. Git Vibe also adds those linked paths to the worktree-local exclude file so the new vibe stays clean.
 
 - the built-in default is `node_modules`
 - set it to `none` to disable automatic shared path linking
@@ -590,7 +644,7 @@ versioning = "npm"
 
 Lifecycle hooks live in the `[hooks]` section of `vibe.toml` and run through `sh -c`.
 
-- `post-create` runs after Git Vibe creates, attaches, or checks out a new worktree, after shared path plumbing is linked, and before it prints the final workspace context
+- `post-create` runs after Git Vibe creates, attaches, or checks out a new worktree-backed vibe, after shared path plumbing is linked, and before it prints the final workspace context
 - `pre-finish` runs after merge verification succeeds and before Git Vibe deletes the worktree or branch
 - `pre-release` runs after release validation passes and before Git Vibe updates the version file, commits, or tags
 
