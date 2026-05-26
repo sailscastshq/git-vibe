@@ -345,6 +345,7 @@ Finishes a vibe safely.
 - With no flag, `git vibe finish <name>` uses the default auto mode. It checks local `main` and your current `origin/main` refs, then cleans up if the branch is already merged.
 - If the branch is already merged into local `main`, it cleans up the vibe and deletes the branch.
 - If the branch is merged into `origin/main`, it fast-forwards local `main`, then cleans up.
+- Auto mode also accepts tree-equivalent branches, which covers GitHub squash and rebase merges where commit SHAs changed but the final branch content is already on `main`.
 - If you pass `--local`, it merges the branch into local `main` with `--ff-only`, then cleans up.
 - If you pass `--sync`, it fetches `origin/main` first, then runs the same cleanup check with fresh remote refs.
 - If you pass `--delete-remote`, Git Vibe also deletes `origin/<branch>` after merge verification and before local cleanup.

@@ -260,7 +260,7 @@ Release versioning should look like this:
 
 ## Finish modes
 
-- `git vibe finish <name>` is the default auto mode. It checks whether the vibe is already merged into local `main` or your current `origin/main` refs, then cleans up if it is.
+- `git vibe finish <name>` is the default auto mode. It checks whether the vibe is already merged into local `main` or your current `origin/main` refs, including tree-equivalent squash/rebase merges, then cleans up if it is.
 - `git vibe finish --sync <name>` fetches `origin/main` first, then runs the same merge check. Use this after a PR was merged on GitHub and your local refs may be stale.
 - `git vibe finish --local <name>` merges the vibe into local `main` with `--ff-only`, then cleans up.
 - `git vibe finish --delete-remote <name>` also deletes `origin/<branch>` after merge verification. If `vibe.deleteRemoteOnFinish=true` in `vibe.toml` or local Git config, that remote cleanup becomes the repo default unless the user passes `--keep-remote`.

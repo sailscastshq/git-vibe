@@ -14,6 +14,8 @@ CONFIG_HOOK_RECORDER="${TMP_DIR}/record-vibe-hook.sh"
 WORKTREE_DIR="${TMP_DIR}/.vibe/demo/smoke-test"
 CONFIG_WORKTREE_DIR="${TMP_DIR}/repo-vibes/config-demo/repo-config-demo"
 WORKTREE_FINISH_DIR="${TMP_DIR}/.vibe/demo/worktree-finish"
+SQUASH_FINISH_WORKTREE_DIR="${TMP_DIR}/.vibe/demo/squash-finish"
+SQUASH_MERGE_CLONE_DIR="${TMP_DIR}/squash-merge-clone"
 ISSUE_WORKTREE_DIR="${TMP_DIR}/.vibe/demo/9-issue-aware-vibe-creation"
 TITLE_ONLY_ISSUE_WORKTREE_DIR="${TMP_DIR}/.vibe/demo/issue-title-only-branch"
 SOLO_MODE_WORKTREE_DIR="${TMP_DIR}/.vibe/demo/solo-mode"
@@ -505,6 +507,47 @@ if git -C "${REPO_DIR}" show-ref --verify --quiet refs/heads/feat/worktree-finis
 fi
 
 printf 'smoke: worktree finish ok\n'
+
+git -C "${REPO_DIR}" push origin main >/dev/null
+
+(
+  cd "${REPO_DIR}" >/dev/null
+  "${ROOT}/bin/git-vibe" code squash-finish >/dev/null
+)
+[[ -d "${SQUASH_FINISH_WORKTREE_DIR}" ]] || fail "squash finish worktree was not created"
+
+printf '\nSquash finish change\n' >> "${SQUASH_FINISH_WORKTREE_DIR}/README.md"
+git -C "${SQUASH_FINISH_WORKTREE_DIR}" add README.md
+git -C "${SQUASH_FINISH_WORKTREE_DIR}" commit -m "feat: update readme for squash finish" >/dev/null
+git -C "${SQUASH_FINISH_WORKTREE_DIR}" push -u origin feat/squash-finish >/dev/null
+
+SQUASH_FINISH_PATCH="${TMP_DIR}/squash-finish.patch"
+git -C "${SQUASH_FINISH_WORKTREE_DIR}" diff --binary main..HEAD -- README.md > "${SQUASH_FINISH_PATCH}"
+
+git clone --branch main "${ORIGIN_DIR}" "${SQUASH_MERGE_CLONE_DIR}" >/dev/null
+git -C "${SQUASH_MERGE_CLONE_DIR}" config user.name "Git Vibe Smoke"
+git -C "${SQUASH_MERGE_CLONE_DIR}" config user.email "smoke@example.com"
+git -C "${SQUASH_MERGE_CLONE_DIR}" apply "${SQUASH_FINISH_PATCH}"
+git -C "${SQUASH_MERGE_CLONE_DIR}" add README.md
+git -C "${SQUASH_MERGE_CLONE_DIR}" commit -m "feat: squash finish change" >/dev/null
+git -C "${SQUASH_MERGE_CLONE_DIR}" push origin main >/dev/null
+
+SQUASH_FINISH_OUTPUT="$(
+  cd "${REPO_DIR}" >/dev/null
+  "${ROOT}/bin/git-vibe" finish --sync squash-finish
+)"
+[[ "${SQUASH_FINISH_OUTPUT}" == *"Finished feat/squash-finish"* ]] || fail "finish --sync did not close the squash-equivalent vibe"
+[[ "${SQUASH_FINISH_OUTPUT}" == *"Merged into: origin/main"* ]] || fail "finish --sync did not report the remote squash-equivalent merge target"
+[[ "${SQUASH_FINISH_OUTPUT}" == *"Merge check: tree-equivalent (squash/rebase)"* ]] || fail "finish --sync did not report the tree-equivalent merge check"
+[[ ! -d "${SQUASH_FINISH_WORKTREE_DIR}" ]] || fail "squash finish worktree still exists after finish"
+if git -C "${REPO_DIR}" show-ref --verify --quiet refs/heads/feat/squash-finish; then
+  fail "squash-equivalent feature branch still exists after finish"
+fi
+if ! git -C "${REPO_DIR}" diff --quiet main origin/main --; then
+  fail "finish --sync did not fast-forward local main after squash-equivalent merge"
+fi
+
+printf 'smoke: squash finish ok\n'
 
 ISSUE_CODE_OUTPUT="$(
   cd "${REPO_DIR}" >/dev/null

@@ -1251,6 +1251,10 @@ is_ancestor_of() {
   git merge-base --is-ancestor "$1" "$2" >/dev/null 2>&1
 }
 
+refs_have_same_tree() {
+  git diff --quiet "$1" "$2" -- >/dev/null 2>&1
+}
+
 find_worktree_for_branch() {
   local target path branch line
   target="refs/heads/$1"
@@ -2457,7 +2461,7 @@ command_diff() {
 }
 
 command_finish() {
-  local name branch slug path mode sync base merged_into shell_output base_path delete_remote delete_remote_override backing active_path
+  local name branch slug path mode sync base merged_into shell_output base_path delete_remote delete_remote_override backing active_path branch_delete_flag merge_check
   local -a name_parts
   require_repo
 
@@ -2537,9 +2541,15 @@ command_finish() {
   fi
 
   merged_into=""
+  branch_delete_flag="-d"
+  merge_check=""
 
   if is_ancestor_of "${branch}" "${base}"; then
     merged_into="${base}"
+  elif refs_have_same_tree "${branch}" "${base}"; then
+    merged_into="${base}"
+    branch_delete_flag="-D"
+    merge_check="tree-equivalent (squash/rebase)"
   elif remote_branch_exists "origin/${base}" && is_ancestor_of "${branch}" "origin/${base}"; then
     if [[ "${backing}" == "worktree" ]]; then
       sync_base_branch
@@ -2552,6 +2562,20 @@ command_finish() {
       git -C "${base_path}" merge --ff-only "origin/${base}" >/dev/null
     fi
     merged_into="origin/${base}"
+  elif remote_branch_exists "origin/${base}" && refs_have_same_tree "${branch}" "origin/${base}"; then
+    if [[ "${backing}" == "worktree" ]]; then
+      sync_base_branch
+      base_path="$(base_worktree_path || true)"
+      [[ -n "${base_path}" ]] || base_path="$(repo_root)"
+    else
+      base_path="$(repo_root)"
+      ensure_clean_tree "${base_path}"
+      git -C "${base_path}" switch "${base}" >/dev/null 2>&1 || true
+      git -C "${base_path}" merge --ff-only "origin/${base}" >/dev/null
+    fi
+    merged_into="origin/${base}"
+    branch_delete_flag="-D"
+    merge_check="tree-equivalent (squash/rebase)"
   elif [[ "${mode}" == "local" ]]; then
     if [[ "${backing}" == "worktree" ]]; then
       base_path="$(base_worktree_path || true)"
@@ -2597,7 +2621,7 @@ command_finish() {
       git worktree remove "${path}"
     fi
 
-    git branch -d "${branch}" >/dev/null
+    git branch "${branch_delete_flag}" "${branch}" >/dev/null
     clear_session_metadata "${branch}"
     clear_branch_workspace "${branch}"
     git worktree prune >/dev/null 2>&1 || true
@@ -2605,6 +2629,9 @@ command_finish() {
 
   say "Finished ${branch}"
   say "Merged into: ${merged_into}"
+  if [[ -n "${merge_check}" ]]; then
+    say "Merge check: ${merge_check}"
+  fi
   if [[ "${delete_remote}" == "false" ]]; then
     say "Remote branch: kept"
   fi
